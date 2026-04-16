@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { connectWallet, personalSign } from './wallet'
+import { connectWallet, personalSign, toChecksumAddress } from './wallet'
 
 describe('wallet helpers', () => {
   it('connects through an EIP-1193 provider', async () => {
     const provider = {
       isMetaMask: true,
       request: vi.fn(async ({ method }: { method: string }) => {
-        if (method === 'eth_requestAccounts') return ['0xabc']
+        if (method === 'eth_requestAccounts') return ['0x822a6cc04c19ec6fa1167896658a87a449f4dd15']
         if (method === 'eth_chainId') return '0x2105'
         return null
       })
@@ -14,9 +14,15 @@ describe('wallet helpers', () => {
 
     const wallet = await connectWallet(provider as unknown as EthereumProvider)
 
-    expect(wallet.address).toBe('0xabc')
+    expect(wallet.address).toBe('0x822A6cc04c19eC6FA1167896658A87a449F4dd15')
     expect(wallet.chainId).toBe('0x2105')
     expect(wallet.isMetaMask).toBe(true)
+  })
+
+  it('converts lowercase addresses to EIP-55 checksum format', () => {
+    expect(toChecksumAddress('0x822a6cc04c19ec6fa1167896658a87a449f4dd15')).toBe(
+      '0x822A6cc04c19eC6FA1167896658A87a449F4dd15'
+    )
   })
 
   it('personal_sign encodes the verification buffer as hex', async () => {

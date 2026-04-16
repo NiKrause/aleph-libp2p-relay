@@ -335,7 +335,7 @@
 
       <div class="metric-stack">
         <div>
-          <span>Available ALEPH</span>
+          <span>Available on Aleph</span>
           <strong>{balance ? formatNumber(Number(balance.balance) - Number(balance.locked_amount), 4) : '-'}</strong>
         </div>
         <div>
@@ -449,7 +449,7 @@
 
       <div class="quote-strip">
         <div>
-          <span>Required</span>
+          <span>Required for deployment</span>
           <strong>
             {validation.quote ? `${formatNumber(validation.quote.required, 4)} ${validation.quote.label}` : '-'}
           </strong>

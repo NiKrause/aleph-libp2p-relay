@@ -20,6 +20,8 @@ import type {
   TierSpec
 } from './types'
 
+const QUOTE_EPSILON = 1e-9
+
 export const DEFAULT_DEPLOYMENT_FORM: DeploymentForm = {
   name: 'py-libp2p-relay',
   sshPublicKey: '',
@@ -132,7 +134,7 @@ export function validateDeployment(args: {
 
     if (!quote || !Number.isFinite(quote.required)) {
       errors.push(`No ${args.form.paymentMode} price is available for this tier.`)
-    } else if (quote.available < quote.required) {
+    } else if (quote.available + QUOTE_EPSILON < quote.required) {
       errors.push(`Insufficient ${quote.label}.`)
     }
   }

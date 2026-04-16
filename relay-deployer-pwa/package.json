@@ -13,6 +13,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "js-sha3": "^0.9.3",
     "svelte": "^5.38.0",
     "vite-plugin-pwa": "^1.0.3"
   },

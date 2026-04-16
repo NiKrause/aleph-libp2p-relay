@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest'
-import { validateRootfsManifest } from './rootfsManifest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { validateRootfsManifest, verifyRootfsExists } from './rootfsManifest'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('validateRootfsManifest', () => {
   it('accepts a complete manifest', () => {
@@ -24,5 +28,19 @@ describe('validateRootfsManifest', () => {
 
     expect(result.valid).toBe(false)
     expect(result.errors).toContain('Rootfs ItemHash must be a 64 character hex value.')
+  })
+
+  it('verifies a store message returned in the Aleph messages array shape', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: 'pending',
+          messages: [{ type: 'STORE' }]
+        }),
+        { status: 200 }
+      )
+    )
+
+    await expect(verifyRootfsExists('f'.repeat(64))).resolves.toBe(true)
   })
 })

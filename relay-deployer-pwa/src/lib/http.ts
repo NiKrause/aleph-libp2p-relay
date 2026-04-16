@@ -7,8 +7,20 @@ export async function fetchWithTimeout(
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
 
   try {
+    if (typeof input === 'string' || input instanceof URL) {
+      const url = new URL(String(input), globalThis.location?.href)
+      url.searchParams.set('_ts', String(Date.now()))
+
+      return await fetch(url, {
+        ...init,
+        cache: init.cache ?? 'no-store',
+        signal: init.signal ?? controller.signal
+      })
+    }
+
     return await fetch(input, {
       ...init,
+      cache: init.cache ?? 'no-store',
       signal: init.signal ?? controller.signal
     })
   } catch (error) {

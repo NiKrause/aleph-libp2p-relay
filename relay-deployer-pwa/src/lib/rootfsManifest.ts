@@ -46,6 +46,7 @@ export async function verifyRootfsExists(itemHash: string, apiHost = ALEPH_API_H
   if (!response.ok) throw new Error(`Rootfs lookup failed: ${response.status}`)
 
   const payload = await response.json()
-  const type = String(payload.type || payload.message?.type || '').toUpperCase()
+  const firstMessage = Array.isArray(payload.messages) ? payload.messages[0] : undefined
+  const type = String(payload.type || payload.message?.type || firstMessage?.type || '').toUpperCase()
   return type === 'STORE'
 }

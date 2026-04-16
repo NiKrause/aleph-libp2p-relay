@@ -44,18 +44,7 @@ export default defineConfig({
             urlPattern: ({ url }) =>
               url.origin === 'https://api2.aleph.im' ||
               url.origin === 'https://crns-list.aleph.sh',
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'aleph-api-cache',
-              networkTimeoutSeconds: 8,
-              expiration: {
-                maxEntries: 80,
-                maxAgeSeconds: 5 * 60
-              },
-              cacheableResponse: {
-                statuses: [0, 200]
-              }
-            }
+            handler: 'NetworkOnly'
           }
         ],
         cleanupOutdatedCaches: true,

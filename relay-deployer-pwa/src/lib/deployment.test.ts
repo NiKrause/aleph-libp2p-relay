@@ -69,6 +69,26 @@ describe('validateDeployment', () => {
     expect(result.quote?.available).toBe(4000)
   })
 
+  it('accepts a hold deployment when available ALEPH exactly matches the requirement', () => {
+    const result = validateDeployment({
+      form: {
+        ...DEFAULT_DEPLOYMENT_FORM,
+        sshPublicKey: 'ssh-ed25519 AAAATEST'
+      },
+      manifest,
+      pricingState: { pricing, fetchedAt: 1000 },
+      balance: { ...balance, balance: '1000', locked_amount: '0' },
+      crns,
+      rootfsVerified: true,
+      now: 1000
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.errors).toEqual([])
+    expect(result.quote?.required).toBe(1000)
+    expect(result.quote?.available).toBe(1000)
+  })
+
   it('rejects hold deployments above tier 3', () => {
     const result = validate({ tierId: 'tier-4' })
 

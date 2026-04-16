@@ -1,4 +1,5 @@
 import { EVM_CHAIN_CONFIG } from './config'
+import { keccak_256 } from 'js-sha3'
 import type { PaymentChain } from './types'
 
 export interface WalletState {
@@ -11,6 +12,22 @@ export function getEthereumProvider(): EthereumProvider | null {
   return globalThis.window?.ethereum ?? null
 }
 
+export function toChecksumAddress(address: string): string {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+    throw new Error('Invalid EVM address.')
+  }
+
+  const normalized = address.slice(2).toLowerCase()
+  const hash = keccak_256(normalized)
+  let result = '0x'
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    result += Number.parseInt(hash[index], 16) >= 8 ? normalized[index].toUpperCase() : normalized[index]
+  }
+
+  return result
+}
+
 export async function connectWallet(provider = getEthereumProvider()): Promise<WalletState> {
   if (!provider) throw new Error('MetaMask provider not found.')
 
@@ -20,7 +37,7 @@ export async function connectWallet(provider = getEthereumProvider()): Promise<W
   if (!address) throw new Error('No wallet account returned.')
 
   return {
-    address,
+    address: toChecksumAddress(address),
     chainId,
     isMetaMask: Boolean(provider.isMetaMask)
   }
