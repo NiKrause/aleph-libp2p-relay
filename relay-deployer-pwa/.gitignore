@@ -1,0 +1,6 @@
+node_modules/
+dist/
+dist-rootfs/
+.svelte-kit/
+.vite/
+*.log

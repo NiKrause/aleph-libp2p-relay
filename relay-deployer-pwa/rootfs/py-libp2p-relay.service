@@ -1,0 +1,17 @@
+[Unit]
+Description=py-libp2p Circuit Relay v2 node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/py-libp2p
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/py-libp2p-relay.env
+ExecStart=/bin/sh -lc 'exec /opt/py-libp2p/.venv/bin/python /opt/py-libp2p/examples/nat/relay.py --port "$RELAY_PORT" ${RELAY_SEED_ARG}'
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

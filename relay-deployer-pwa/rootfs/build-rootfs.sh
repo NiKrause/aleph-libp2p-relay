@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_DIR="$(cd "${APP_DIR}/.." && pwd)"
+OUT_DIR="${OUT_DIR:-${APP_DIR}/dist-rootfs}"
+IMAGE="${OUT_DIR}/aleph-py-libp2p-relay.qcow2"
+ROOTFS_VERSION="${ROOTFS_VERSION:-relay-v0.1.0}"
+ROOTFS_SIZE_MIB="${ROOTFS_SIZE_MIB:-20480}"
+CHANNEL="${CHANNEL:-ALEPH-CLOUDSOLUTIONS}"
+SKIP_UPLOAD="${SKIP_UPLOAD:-0}"
+SKIP_BUILD="${SKIP_BUILD:-0}"
+IPFS_ADD_URL="${IPFS_ADD_URL:-https://ipfs.aleph.cloud/api/v0/add}"
+
+require() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "Missing required command: $1" >&2
+    exit 1
+  }
+}
+
+resolve_aleph_bin() {
+  if [ -n "${ALEPH_BIN:-}" ]; then
+    printf '%s\n' "${ALEPH_BIN}"
+    return
+  fi
+
+  local local_aleph="${REPO_DIR}/aleph-client/.venv/bin/aleph"
+  if [ -x "${local_aleph}" ]; then
+    printf '%s\n' "${local_aleph}"
+    return
+  fi
+
+  if command -v aleph >/dev/null 2>&1; then
+    command -v aleph
+    return
+  fi
+
+  echo "Missing aleph CLI. Set ALEPH_BIN=/path/to/aleph or install aleph-client." >&2
+  exit 1
+}
+
+build_with_host_tools() {
+  echo "Using host virt-customize/qemu-img toolchain."
+  "${SCRIPT_DIR}/build-rootfs-image.sh"
+}
+
+build_with_docker() {
+  require docker
+
+  if ! docker info >/dev/null 2>&1; then
+    echo "Docker is installed, but the Docker daemon is not running." >&2
+    echo "Start Docker Desktop, wait until it is ready, then rerun rootfs/build-rootfs.sh." >&2
+    exit 1
+  fi
+
+  echo "virt-customize is not available on this host."
+  echo "Using Dockerized Debian/libguestfs builder instead."
+  echo "This can be slow on macOS because qemu may run without hardware acceleration."
+
+  docker build --platform linux/amd64 \
+    -t aleph-relay-rootfs-builder:local \
+    -f "${SCRIPT_DIR}/Dockerfile.rootfs" \
+    "${SCRIPT_DIR}"
+
+  docker run --rm --privileged --platform linux/amd64 \
+    -e LIBGUESTFS_BACKEND=direct \
+    -e PY_LIBP2P_DIR=/workspace/py-libp2p \
+    -e OUT_DIR=/workspace/relay-deployer-pwa/dist-rootfs \
+    -e BASE_URL="${BASE_URL:-}" \
+    -e IMAGE_SIZE="${IMAGE_SIZE:-20G}" \
+    -v "${REPO_DIR}:/workspace" \
+    -w /workspace/relay-deployer-pwa \
+    aleph-relay-rootfs-builder:local \
+    bash rootfs/build-rootfs-image.sh
+}
+
+write_manifest() {
+  local rootfs_item_hash="$1"
+
+  cat > "${OUT_DIR}/rootfs-manifest.json" <<EOF
+{
+  "version": "${ROOTFS_VERSION}",
+  "rootfsItemHash": "${rootfs_item_hash}",
+  "rootfsSizeMiB": ${ROOTFS_SIZE_MIB},
+  "createdAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+
+  echo "Rootfs manifest written to ${OUT_DIR}/rootfs-manifest.json"
+}
+
+upload_image() {
+  local aleph_bin
+  aleph_bin="$(resolve_aleph_bin)"
+
+  require python3
+  require curl
+
+  echo "Uploading ${IMAGE} to IPFS via ${IPFS_ADD_URL}..." >&2
+  curl --fail --silent --show-error \
+    -X POST \
+    -F "file=@${IMAGE}" \
+    "${IPFS_ADD_URL}" \
+    > "${OUT_DIR}/ipfs-add-response.jsonl"
+
+  local cid
+  cid="$(python3 - "${OUT_DIR}/ipfs-add-response.jsonl" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+lines = [line for line in Path(sys.argv[1]).read_text().splitlines() if line.strip()]
+if not lines:
+    raise SystemExit("No response received from the IPFS add endpoint")
+
+payload = json.loads(lines[-1])
+cid = payload.get("Hash")
+if not cid:
+    raise SystemExit(f"IPFS add response did not include a Hash: {payload}")
+
+print(cid)
+PY
+)"
+
+  echo "Pinning CID ${cid} on Aleph Cloud with ${aleph_bin}..." >&2
+  "${aleph_bin}" file pin "${cid}" \
+    --channel "${CHANNEL}" \
+    > "${OUT_DIR}/store-message.json"
+
+  python3 - "${OUT_DIR}/store-message.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+print(payload["item_hash"])
+PY
+}
+
+mkdir -p "${OUT_DIR}"
+
+if [ "${SKIP_BUILD}" != "1" ]; then
+  if command -v virt-customize >/dev/null 2>&1; then
+    build_with_host_tools
+  else
+    build_with_docker
+  fi
+else
+  echo "SKIP_BUILD=1 set; reusing ${IMAGE}"
+fi
+
+if [ "${SKIP_UPLOAD}" = "1" ]; then
+  echo "SKIP_UPLOAD=1 set; image ready at ${IMAGE}"
+  echo "Upload later with: SKIP_BUILD=1 rootfs/build-rootfs.sh"
+  exit 0
+fi
+
+ROOTFS_ITEM_HASH="$(upload_image)"
+write_manifest "${ROOTFS_ITEM_HASH}"

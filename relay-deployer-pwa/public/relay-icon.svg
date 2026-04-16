@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="Aleph relay">
+  <rect width="192" height="192" rx="38" fill="#0f172a"/>
+  <path d="M38 128c18-24 38-36 58-36s40 12 58 36" fill="none" stroke="#38bdf8" stroke-width="12" stroke-linecap="round"/>
+  <path d="M54 76c14-13 28-20 42-20s28 7 42 20" fill="none" stroke="#f97316" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="96" cy="105" r="19" fill="#f8fafc"/>
+  <circle cx="96" cy="105" r="8" fill="#0f172a"/>
+</svg>

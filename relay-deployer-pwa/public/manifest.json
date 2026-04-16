@@ -1,0 +1,19 @@
+{
+  "name": "Aleph Relay Deployer",
+  "short_name": "Relay Deploy",
+  "description": "Deploy a py-libp2p relay VM on Aleph Cloud directly from the browser.",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "./relay-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
