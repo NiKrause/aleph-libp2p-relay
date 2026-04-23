@@ -1,6 +1,11 @@
 {
-  "version": "relay-v0.1.0",
-  "rootfsItemHash": "16105f72349fa1fa35f6e5c7998f977dbbedf0359183e50d976399eec1c0c68a",
+  "profile": "orbitdb-relay-pinner",
+  "version": "orbitdb-relay-pinner-v0.1.0",
+  "rootfsInstallStrategy": "thin",
+  "requiresBootstrapNetwork": true,
+  "bootstrapSummary": "First boot installs runtime packages and application dependencies. Outbound network access is required before the relay service becomes healthy.",
+  "rootfsSourceSizeBytes": 352780288,
+  "rootfsItemHash": "c1b84d3418796ff2f897e2783246b1af8b8531425fd0bf69584a049590183c4f",
   "rootfsSizeMiB": 20480,
-  "createdAt": "2026-04-16T13:28:47Z"
+  "createdAt": "2026-04-21T15:10:21.460593Z"
 }

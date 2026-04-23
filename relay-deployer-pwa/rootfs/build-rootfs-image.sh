@@ -4,11 +4,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${APP_DIR}/.." && pwd)"
+ROOTFS_PROFILE="${ROOTFS_PROFILE:-py-libp2p}"
+ROOTFS_INSTALL_MODE="${ROOTFS_INSTALL_MODE:-thin}"
 PY_LIBP2P_DIR="${PY_LIBP2P_DIR:-${REPO_DIR}/py-libp2p}"
+ORBITDB_RELAY_PINNER_DIR="${ORBITDB_RELAY_PINNER_DIR:-}"
 OUT_DIR="${OUT_DIR:-${APP_DIR}/dist-rootfs}"
 BASE_URL="${BASE_URL:-https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2}"
 BASE_IMAGE="${OUT_DIR}/debian-12-genericcloud-amd64.qcow2"
-IMAGE="${OUT_DIR}/aleph-py-libp2p-relay.qcow2"
 IMAGE_SIZE="${IMAGE_SIZE:-20G}"
 
 require() {
@@ -23,12 +25,52 @@ require qemu-img
 require virt-customize
 require tar
 
-if [ ! -d "${PY_LIBP2P_DIR}" ]; then
-  echo "Missing py-libp2p directory: ${PY_LIBP2P_DIR}" >&2
-  exit 1
-fi
+case "${ROOTFS_INSTALL_MODE}" in
+  thin|prebaked)
+    ;;
+  *)
+    echo "Unsupported ROOTFS_INSTALL_MODE: ${ROOTFS_INSTALL_MODE}" >&2
+    echo "Expected one of: thin, prebaked" >&2
+    exit 1
+    ;;
+esac
+
+case "${ROOTFS_PROFILE}" in
+  py-libp2p)
+    IMAGE="${OUT_DIR}/aleph-py-libp2p-relay.qcow2"
+    APP_TAR="${OUT_DIR}/py-libp2p.tar"
+    if [ ! -d "${PY_LIBP2P_DIR}" ]; then
+      echo "Missing py-libp2p directory: ${PY_LIBP2P_DIR}" >&2
+      exit 1
+    fi
+    ;;
+  orbitdb-relay-pinner)
+    IMAGE="${OUT_DIR}/aleph-orbitdb-relay-pinner.qcow2"
+    APP_TAR="${OUT_DIR}/orbitdb-relay-pinner.tar"
+    if [ -z "${ORBITDB_RELAY_PINNER_DIR}" ]; then
+      echo "ROOTFS_PROFILE=orbitdb-relay-pinner requires ORBITDB_RELAY_PINNER_DIR=/path/to/orbitdb-relay-pinner" >&2
+      exit 1
+    fi
+    if [ ! -d "${ORBITDB_RELAY_PINNER_DIR}" ]; then
+      echo "Missing orbitdb-relay-pinner directory: ${ORBITDB_RELAY_PINNER_DIR}" >&2
+      exit 1
+    fi
+    if [ ! -d "${ORBITDB_RELAY_PINNER_DIR}/dist" ]; then
+      echo "Missing orbitdb-relay-pinner dist directory: ${ORBITDB_RELAY_PINNER_DIR}/dist" >&2
+      echo "Build orbitdb-relay-pinner before creating this rootfs image." >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "Unsupported ROOTFS_PROFILE: ${ROOTFS_PROFILE}" >&2
+    echo "Expected one of: py-libp2p, orbitdb-relay-pinner" >&2
+    exit 1
+    ;;
+esac
 
 mkdir -p "${OUT_DIR}"
+
+echo "Building ${ROOTFS_PROFILE} image in ${ROOTFS_INSTALL_MODE} mode"
 
 if [ ! -f "${BASE_IMAGE}" ]; then
   curl -L "${BASE_URL}" -o "${BASE_IMAGE}"
@@ -37,24 +79,81 @@ fi
 cp "${BASE_IMAGE}" "${IMAGE}"
 qemu-img resize "${IMAGE}" "${IMAGE_SIZE}"
 
-tar \
-  --exclude ".git" \
-  --exclude ".venv" \
-  --exclude "__pycache__" \
-  -C "$(dirname "${PY_LIBP2P_DIR}")" \
-  -cf "${OUT_DIR}/py-libp2p.tar" \
-  "$(basename "${PY_LIBP2P_DIR}")"
+case "${ROOTFS_PROFILE}" in
+  py-libp2p)
+    tar \
+      --exclude ".git" \
+      --exclude ".venv" \
+      --exclude "__pycache__" \
+      -C "$(dirname "${PY_LIBP2P_DIR}")" \
+      -cf "${APP_TAR}" \
+      "$(basename "${PY_LIBP2P_DIR}")"
 
-virt-customize -a "${IMAGE}" \
-  --install "ca-certificates,curl,git,python3,python3-pip,python3-venv,build-essential,libgmp-dev" \
-  --mkdir /opt/py-libp2p \
-  --copy-in "${OUT_DIR}/py-libp2p.tar:/opt" \
-  --copy-in "${SCRIPT_DIR}/relay-bootstrap.sh:/usr/local/sbin" \
-  --copy-in "${SCRIPT_DIR}/py-libp2p-relay.service:/etc/systemd/system" \
-  --run-command "tar -xf /opt/py-libp2p.tar -C /opt/py-libp2p --strip-components=1" \
-  --run-command "chmod 0755 /usr/local/sbin/relay-bootstrap.sh" \
-  --run-command "RELAY_PORT=4001 /usr/local/sbin/relay-bootstrap.sh" \
-  --run-command "apt-get clean" \
-  --run-command "rm -f /opt/py-libp2p.tar"
+    py_customize_args=(
+      -a "${IMAGE}"
+      --mkdir /opt/py-libp2p
+      --mkdir /var/lib/py-libp2p-relay
+      --copy-in "${APP_TAR}:/opt"
+      --copy-in "${SCRIPT_DIR}/relay-bootstrap.sh:/usr/local/sbin"
+      --copy-in "${SCRIPT_DIR}/py-libp2p-relay.service:/etc/systemd/system"
+      --copy-in "${SCRIPT_DIR}/py-libp2p-relay-bootstrap.service:/etc/systemd/system"
+      --run-command "tar -xf /opt/$(basename "${APP_TAR}") -C /opt/py-libp2p --strip-components=1"
+      --run-command "chmod 0755 /usr/local/sbin/relay-bootstrap.sh"
+    )
+
+    if [ "${ROOTFS_INSTALL_MODE}" = "prebaked" ]; then
+      py_customize_args+=(
+        --run-command "BOOTSTRAP_STAMP=/var/lib/py-libp2p-relay/bootstrap-complete RELAY_PORT=4001 /usr/local/sbin/relay-bootstrap.sh"
+      )
+    fi
+
+    py_customize_args+=(
+      --run-command "systemctl enable py-libp2p-relay.service"
+      --run-command "rm -f /opt/$(basename "${APP_TAR}")"
+    )
+
+    virt-customize "${py_customize_args[@]}"
+    ;;
+  orbitdb-relay-pinner)
+    tar \
+      -C "${ORBITDB_RELAY_PINNER_DIR}" \
+      -cf "${APP_TAR}" \
+      dist \
+      deploy \
+      package.json \
+      pnpm-lock.yaml \
+      pnpm-workspace.yaml \
+      README.md \
+      LICENSE \
+      .env.example
+
+    orbitdb_customize_args=(
+      -a "${IMAGE}"
+      --mkdir /opt/orbitdb-relay-pinner
+      --mkdir /var/lib/orbitdb-relay-pinner
+      --mkdir /etc/systemd/system/orbitdb-relay-pinner.service.d
+      --copy-in "${APP_TAR}:/opt"
+      --copy-in "${SCRIPT_DIR}/orbitdb-relay-pinner-bootstrap.sh:/usr/local/sbin"
+      --copy-in "${SCRIPT_DIR}/orbitdb-relay-pinner-bootstrap.service:/etc/systemd/system"
+      --copy-in "${SCRIPT_DIR}/orbitdb-relay-pinner-bootstrap.conf:/etc/systemd/system/orbitdb-relay-pinner.service.d"
+      --run-command "tar -xf /opt/$(basename "${APP_TAR}") -C /opt/orbitdb-relay-pinner"
+      --run-command "chmod 0755 /usr/local/sbin/orbitdb-relay-pinner-bootstrap.sh"
+      --run-command "cp /opt/orbitdb-relay-pinner/deploy/orbitdb-relay-pinner.service /etc/systemd/system/orbitdb-relay-pinner.service"
+    )
+
+    if [ "${ROOTFS_INSTALL_MODE}" = "prebaked" ]; then
+      orbitdb_customize_args+=(
+        --run-command "BOOTSTRAP_STAMP=/var/lib/orbitdb-relay-pinner/bootstrap-complete SERVICE_NAME=orbitdb-relay-pinner /usr/local/sbin/orbitdb-relay-pinner-bootstrap.sh"
+      )
+    fi
+
+    orbitdb_customize_args+=(
+      --run-command "systemctl enable orbitdb-relay-pinner.service"
+      --run-command "rm -f /opt/$(basename "${APP_TAR}")"
+    )
+
+    virt-customize "${orbitdb_customize_args[@]}"
+    ;;
+esac
 
 echo "Rootfs image ready at ${IMAGE}"

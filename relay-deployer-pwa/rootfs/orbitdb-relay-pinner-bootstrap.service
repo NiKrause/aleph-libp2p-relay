@@ -1,0 +1,19 @@
+[Unit]
+Description=Prepare orbitdb-relay-pinner runtime on first boot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=INSTALL_DIR=/opt/orbitdb-relay-pinner
+Environment=SERVICE_NAME=orbitdb-relay-pinner
+Environment=SERVICE_USER=orbitdb-relay
+Environment=DATA_DIR=/var/lib/orbitdb-relay-pinner
+Environment=ENV_FILE=/etc/default/orbitdb-relay-pinner
+Environment=BOOTSTRAP_STAMP=/var/lib/orbitdb-relay-pinner/bootstrap-complete
+ExecStart=/usr/local/sbin/orbitdb-relay-pinner-bootstrap.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=30min
+

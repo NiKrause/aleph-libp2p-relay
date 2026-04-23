@@ -1,5 +1,7 @@
 [Unit]
 Description=py-libp2p Circuit Relay v2 node
+Requires=py-libp2p-relay-bootstrap.service
+After=py-libp2p-relay-bootstrap.service
 After=network-online.target
 Wants=network-online.target
 

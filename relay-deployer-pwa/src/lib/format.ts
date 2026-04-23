@@ -1,3 +1,5 @@
+import type { Crn } from './types'
+
 export function shortHash(value: string, head = 8, tail = 8): string {
   if (!value) return '-'
   if (value.length <= head + tail + 3) return value
@@ -31,4 +33,49 @@ export function explorerUrl(address: string, itemHash: string): string {
 
 export function apiMessageUrl(itemHash: string): string {
   return `https://api2.aleph.im/api/v0/messages/${itemHash}`
+}
+
+export function crnHost(address: string): string {
+  try {
+    return new URL(address).host
+  } catch {
+    return address
+  }
+}
+
+function locationParts(crn: Crn): string[] {
+  const parts: string[] = []
+  const add = (value: unknown) => {
+    if (typeof value !== 'string') return
+    const normalized = value.trim()
+    if (!normalized || parts.includes(normalized)) return
+    parts.push(normalized)
+  }
+
+  add(crn.city)
+  add(crn.region)
+  add(crn.country)
+
+  if (typeof crn.location === 'string') {
+    add(crn.location)
+  } else if (crn.location && typeof crn.location === 'object') {
+    add(crn.location.city)
+    add(crn.location.region)
+    add(crn.location.country)
+  }
+
+  return parts
+}
+
+export function crnLocationLabel(crn: Crn): string | null {
+  const parts = locationParts(crn)
+  return parts.length > 0 ? parts.join(', ') : null
+}
+
+export function crnDisplayLabel(crn: Crn): string {
+  const label = crn.name || shortHash(crn.hash)
+  const host = crnHost(crn.address)
+  const location = crnLocationLabel(crn)
+
+  return location ? `${label} - ${host} (${location})` : `${label} - ${host}`
 }

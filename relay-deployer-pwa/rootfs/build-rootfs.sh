@@ -5,13 +5,43 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${APP_DIR}/.." && pwd)"
 OUT_DIR="${OUT_DIR:-${APP_DIR}/dist-rootfs}"
-IMAGE="${OUT_DIR}/aleph-py-libp2p-relay.qcow2"
-ROOTFS_VERSION="${ROOTFS_VERSION:-relay-v0.1.0}"
+ROOTFS_PROFILE="${ROOTFS_PROFILE:-py-libp2p}"
+ROOTFS_INSTALL_MODE="${ROOTFS_INSTALL_MODE:-thin}"
 ROOTFS_SIZE_MIB="${ROOTFS_SIZE_MIB:-20480}"
 CHANNEL="${CHANNEL:-ALEPH-CLOUDSOLUTIONS}"
 SKIP_UPLOAD="${SKIP_UPLOAD:-0}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 IPFS_ADD_URL="${IPFS_ADD_URL:-https://ipfs.aleph.cloud/api/v0/add}"
+ORBITDB_RELAY_PINNER_DIR="${ORBITDB_RELAY_PINNER_DIR:-}"
+
+case "${ROOTFS_PROFILE}" in
+  py-libp2p)
+    IMAGE_BASENAME="aleph-py-libp2p-relay.qcow2"
+    DEFAULT_ROOTFS_VERSION="py-libp2p-relay-v0.1.0"
+    ;;
+  orbitdb-relay-pinner)
+    IMAGE_BASENAME="aleph-orbitdb-relay-pinner.qcow2"
+    DEFAULT_ROOTFS_VERSION="orbitdb-relay-pinner-v0.1.0"
+    ;;
+  *)
+    echo "Unsupported ROOTFS_PROFILE: ${ROOTFS_PROFILE}" >&2
+    echo "Expected one of: py-libp2p, orbitdb-relay-pinner" >&2
+    exit 1
+    ;;
+esac
+
+case "${ROOTFS_INSTALL_MODE}" in
+  thin|prebaked)
+    ;;
+  *)
+    echo "Unsupported ROOTFS_INSTALL_MODE: ${ROOTFS_INSTALL_MODE}" >&2
+    echo "Expected one of: thin, prebaked" >&2
+    exit 1
+    ;;
+esac
+
+IMAGE="${OUT_DIR}/${IMAGE_BASENAME}"
+ROOTFS_VERSION="${ROOTFS_VERSION:-${DEFAULT_ROOTFS_VERSION}}"
 
 require() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -64,13 +94,32 @@ build_with_docker() {
     -f "${SCRIPT_DIR}/Dockerfile.rootfs" \
     "${SCRIPT_DIR}"
 
+  local orbitdb_mount=()
+  local orbitdb_env=()
+  if [ "${ROOTFS_PROFILE}" = "orbitdb-relay-pinner" ]; then
+    if [ -z "${ORBITDB_RELAY_PINNER_DIR}" ]; then
+      echo "ROOTFS_PROFILE=orbitdb-relay-pinner requires ORBITDB_RELAY_PINNER_DIR=/path/to/orbitdb-relay-pinner" >&2
+      exit 1
+    fi
+    if [ ! -d "${ORBITDB_RELAY_PINNER_DIR}" ]; then
+      echo "Missing orbitdb-relay-pinner directory: ${ORBITDB_RELAY_PINNER_DIR}" >&2
+      exit 1
+    fi
+    orbitdb_mount=(-v "${ORBITDB_RELAY_PINNER_DIR}:/workspace-orbitdb-relay-pinner:ro")
+    orbitdb_env=(-e ORBITDB_RELAY_PINNER_DIR=/workspace-orbitdb-relay-pinner)
+  fi
+
   docker run --rm --privileged --platform linux/amd64 \
     -e LIBGUESTFS_BACKEND=direct \
+    -e ROOTFS_PROFILE="${ROOTFS_PROFILE}" \
+    -e ROOTFS_INSTALL_MODE="${ROOTFS_INSTALL_MODE}" \
     -e PY_LIBP2P_DIR=/workspace/py-libp2p \
+    "${orbitdb_env[@]}" \
     -e OUT_DIR=/workspace/relay-deployer-pwa/dist-rootfs \
     -e BASE_URL="${BASE_URL:-}" \
     -e IMAGE_SIZE="${IMAGE_SIZE:-20G}" \
     -v "${REPO_DIR}:/workspace" \
+    "${orbitdb_mount[@]}" \
     -w /workspace/relay-deployer-pwa \
     aleph-relay-rootfs-builder:local \
     bash rootfs/build-rootfs-image.sh
@@ -78,11 +127,43 @@ build_with_docker() {
 
 write_manifest() {
   local rootfs_item_hash="$1"
+  local rootfs_source_size_bytes=""
+  local requires_bootstrap_network="false"
+  local bootstrap_summary="Dependencies are preinstalled in the image."
+
+  if [ "${ROOTFS_INSTALL_MODE}" = "thin" ]; then
+    requires_bootstrap_network="true"
+    bootstrap_summary="First boot installs runtime packages and application dependencies. Outbound network access is required before the relay service becomes healthy."
+  fi
+
+  if [ -f "${OUT_DIR}/ipfs-add-response.jsonl" ]; then
+    rootfs_source_size_bytes="$(python3 - "${OUT_DIR}/ipfs-add-response.jsonl" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+lines = [line for line in Path(sys.argv[1]).read_text().splitlines() if line.strip()]
+if not lines:
+    raise SystemExit(0)
+
+payload = json.loads(lines[-1])
+size = payload.get("Size")
+if isinstance(size, str) and size.isdigit():
+    print(size)
+elif isinstance(size, int) and size > 0:
+    print(size)
+PY
+)"
+  fi
 
   cat > "${OUT_DIR}/rootfs-manifest.json" <<EOF
 {
+  "profile": "${ROOTFS_PROFILE}",
   "version": "${ROOTFS_VERSION}",
-  "rootfsItemHash": "${rootfs_item_hash}",
+  "rootfsInstallStrategy": "${ROOTFS_INSTALL_MODE}",
+  "requiresBootstrapNetwork": ${requires_bootstrap_network},
+  "bootstrapSummary": "${bootstrap_summary}",
+$(if [[ "${rootfs_source_size_bytes}" =~ ^[0-9]+$ ]]; then printf '  "rootfsSourceSizeBytes": %s,\n' "${rootfs_source_size_bytes}"; fi)  "rootfsItemHash": "${rootfs_item_hash}",
   "rootfsSizeMiB": ${ROOTFS_SIZE_MIB},
   "createdAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
@@ -140,6 +221,9 @@ PY
 }
 
 mkdir -p "${OUT_DIR}"
+
+echo "Building rootfs profile: ${ROOTFS_PROFILE}"
+echo "Using install mode: ${ROOTFS_INSTALL_MODE}"
 
 if [ "${SKIP_BUILD}" != "1" ]; then
   if command -v virt-customize >/dev/null 2>&1; then

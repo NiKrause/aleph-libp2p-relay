@@ -1,0 +1,17 @@
+[Unit]
+Description=Prepare py-libp2p relay runtime on first boot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=INSTALL_DIR=/opt/py-libp2p
+Environment=DATA_DIR=/var/lib/py-libp2p-relay
+Environment=ENV_FILE=/etc/py-libp2p-relay.env
+Environment=BOOTSTRAP_STAMP=/var/lib/py-libp2p-relay/bootstrap-complete
+ExecStart=/usr/local/sbin/relay-bootstrap.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=30min
+

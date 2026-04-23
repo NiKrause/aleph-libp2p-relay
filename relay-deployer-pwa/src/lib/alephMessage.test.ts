@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createInstanceContent, createUnsignedInstanceMessage, signaturePayload, signInstanceMessage } from './alephMessage'
+import { ALEPH_BASE_ROOTFS_ITEM_HASHES } from './config'
 import { DEFAULT_DEPLOYMENT_FORM } from './deployment'
 import type { InstancePricing, RootfsManifest, Tier } from './types'
 
@@ -22,7 +23,11 @@ describe('Aleph instance message helpers', () => {
   it('builds instance content with the pinned rootfs reference', () => {
     const content = createInstanceContent({
       address: '0xabc',
-      form: { ...DEFAULT_DEPLOYMENT_FORM, sshPublicKey: 'ssh-ed25519 AAAATEST' },
+      form: {
+        ...DEFAULT_DEPLOYMENT_FORM,
+        rootfsSourceMode: 'custom',
+        sshPublicKey: 'ssh-ed25519 AAAATEST'
+      },
       manifest,
       pricing,
       tier,
@@ -30,15 +35,46 @@ describe('Aleph instance message helpers', () => {
     })
 
     expect(content.rootfs.parent.ref).toBe(manifest.rootfsItemHash)
+    expect(content.rootfs.persistence).toBe('host')
+    expect(content.allow_amend).toBe(false)
     expect(content.resources.memory).toBe(2048)
+    expect(content.resources.seconds).toBe(30)
+    expect(content.environment.internet).toBe(true)
+    expect(content.environment.aleph_api).toBe(true)
+    expect(content.environment.reproducible).toBe(false)
+    expect(content.environment.shared_cache).toBe(false)
     expect(content.payment.type).toBe('hold')
-    expect(content.payment.chain).toBe('BASE')
+    expect(content.payment.chain).toBe('ETH')
+  })
+
+  it('builds instance content with an Aleph base-image rootfs reference', () => {
+    const content = createInstanceContent({
+      address: '0xabc',
+      form: {
+        ...DEFAULT_DEPLOYMENT_FORM,
+        rootfsSourceMode: 'base',
+        baseRootfs: 'debian12',
+        sshPublicKey: 'ssh-ed25519 AAAATEST'
+      },
+      manifest: null,
+      pricing,
+      tier,
+      now: 10
+    })
+
+    expect(content.rootfs.parent.ref).toBe(ALEPH_BASE_ROOTFS_ITEM_HASHES.debian12)
+    expect(content.rootfs.parent.use_latest).toBe(true)
+    expect(content.rootfs.size_mib).toBe(20480)
   })
 
   it('creates the exact Aleph signature payload shape', async () => {
     const content = createInstanceContent({
       address: '0xabc',
-      form: { ...DEFAULT_DEPLOYMENT_FORM, sshPublicKey: 'ssh-ed25519 AAAATEST' },
+      form: {
+        ...DEFAULT_DEPLOYMENT_FORM,
+        rootfsSourceMode: 'custom',
+        sshPublicKey: 'ssh-ed25519 AAAATEST'
+      },
       manifest,
       pricing,
       tier,

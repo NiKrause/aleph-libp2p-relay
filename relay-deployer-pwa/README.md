@@ -8,7 +8,7 @@ directly from the browser. There is no app server.
 - Connects MetaMask.
 - Loads live Aleph instance pricing, wallet balance, credits, and CRNs.
 - Offers `hold` and `credit` payment modes.
-- Uses a pinned rootfs release manifest from `public/rootfs-manifest.json`.
+- Supports Aleph-provided base images and custom pinned rootfs manifests.
 - Builds, signs, and broadcasts an Aleph `INSTANCE` message in the browser.
 - Lists previous Aleph instance messages for the connected wallet.
 
@@ -28,18 +28,44 @@ pnpm build
 The output in `dist/` is fully static and can be served by any static host or
 published through IPFS/Aleph hosting.
 
-## Rootfs Manifest
+## Rootfs Sources
 
-`public/rootfs-manifest.json` intentionally starts without a `rootfsItemHash`.
-Build and upload the custom rootfs first:
+The deploy form now defaults to Aleph-managed base images like Ubuntu 22 and Debian 12.
+That path does not require a custom `STORE` rootfs message.
+
+If you want to use a custom qcow2 rootfs instead, keep using
+`public/rootfs-manifest.json` and build/upload the image first:
 
 ```bash
 rootfs/build-rootfs.sh
 cp dist-rootfs/rootfs-manifest.json public/rootfs-manifest.json
 ```
 
-The PWA blocks deployment until the manifest contains a valid Aleph `STORE`
-message hash and the hash resolves through `https://api2.aleph.im`.
+The rootfs builder now defaults to a thin image. That keeps the uploaded qcow2
+much smaller, but the deployed VM installs runtime packages and application
+dependencies on first boot. Outbound network access is required during that
+bootstrap phase, and the service may take longer to become healthy immediately
+after deployment. This only applies when you choose `Custom rootfs` in the UI.
+
+To build the alternative OrbitDB relay image instead of the default
+`py-libp2p` image:
+
+```bash
+ROOTFS_PROFILE=orbitdb-relay-pinner \
+ORBITDB_RELAY_PINNER_DIR=/Users/nandi/orbitdb-relay-pinner \
+rootfs/build-rootfs.sh
+cp dist-rootfs/rootfs-manifest.json public/rootfs-manifest.json
+```
+
+For troubleshooting you can still force the older fully baked image path:
+
+```bash
+ROOTFS_INSTALL_MODE=prebaked rootfs/build-rootfs.sh
+```
+
+When `Custom rootfs` is selected, the PWA blocks deployment until the manifest
+contains a valid Aleph `STORE` message hash and the hash resolves through
+`https://api2.aleph.im`.
 
 ## Browser Signing
 

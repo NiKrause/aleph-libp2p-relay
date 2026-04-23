@@ -1,4 +1,4 @@
-import { ALEPH_DEFAULT_CHANNEL } from './config'
+import { ALEPH_BASE_ROOTFS_ITEM_HASHES, ALEPH_DEFAULT_CHANNEL } from './config'
 import { sha256Hex } from './crypto'
 import { broadcastInstanceMessage } from './alephApi'
 import { createReleaseMetadata, tierSpec } from './deployment'
@@ -18,7 +18,7 @@ import type {
 export function createInstanceContent(args: {
   address: string
   form: DeploymentForm
-  manifest: RootfsManifest
+  manifest: RootfsManifest | null
   pricing: InstancePricing
   tier: Tier
   selectedCrn?: Crn | null
@@ -31,12 +31,24 @@ export function createInstanceContent(args: {
     args.form.paymentMode === 'credit' && args.selectedCrn
       ? { node: { node_hash: args.selectedCrn.hash } }
       : undefined
+  const rootfsRef =
+    args.form.rootfsSourceMode === 'base'
+      ? ALEPH_BASE_ROOTFS_ITEM_HASHES[args.form.baseRootfs]
+      : args.manifest?.rootfsItemHash ?? ''
+  const rootfsSizeMiB =
+    args.form.rootfsSourceMode === 'base'
+      ? spec.diskMiB
+      : Math.max(args.manifest?.rootfsSizeMiB ?? spec.diskMiB, spec.diskMiB)
+  const rootfsVersion =
+    args.form.rootfsSourceMode === 'base'
+      ? `aleph-base-${args.form.baseRootfs}`
+      : args.manifest?.version ?? 'custom-rootfs'
 
   const content: AlephInstanceContent = {
     address: args.address,
     time: args.now ?? Date.now() / 1000,
     allow_amend: false,
-    metadata: createReleaseMetadata(args.form.name.trim(), args.manifest),
+    metadata: createReleaseMetadata(args.form.name.trim(), rootfsVersion),
     authorized_keys: sshKey ? [sshKey] : undefined,
     environment: {
       internet: true,
@@ -52,18 +64,17 @@ export function createInstanceContent(args: {
     },
     payment: {
       chain: args.form.paymentMode === 'hold' ? args.form.paymentChain : undefined,
-      receiver: null,
       type: args.form.paymentMode
     },
     requirements,
     volumes: [],
     rootfs: {
       parent: {
-        ref: args.manifest.rootfsItemHash,
+        ref: rootfsRef,
         use_latest: true
       },
       persistence: 'host',
-      size_mib: Math.max(args.manifest.rootfsSizeMiB, spec.diskMiB)
+      size_mib: rootfsSizeMiB
     }
   }
 
@@ -120,7 +131,7 @@ function normalizeStatus(httpStatus: number, responseStatus: unknown): MessageSt
 export async function deployInstance(args: {
   sender: string
   form: DeploymentForm
-  manifest: RootfsManifest
+  manifest: RootfsManifest | null
   pricing: InstancePricing
   tier: Tier
   selectedCrn?: Crn | null

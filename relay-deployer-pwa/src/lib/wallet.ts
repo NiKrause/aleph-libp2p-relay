@@ -1,4 +1,5 @@
-import { EVM_CHAIN_CONFIG } from './config'
+import { ALEPH_TOKEN_CONTRACTS, EVM_CHAIN_CONFIG } from './config'
+import { fetchWithTimeout } from './http'
 import { keccak_256 } from 'js-sha3'
 import type { PaymentChain } from './types'
 
@@ -10,6 +11,22 @@ export interface WalletState {
 
 export function getEthereumProvider(): EthereumProvider | null {
   return globalThis.window?.ethereum ?? null
+}
+
+function hexToDecimalString(value: string): string {
+  if (!/^0x[0-9a-fA-F]+$/.test(value)) {
+    throw new Error(`Invalid hex value returned by RPC: ${value}`)
+  }
+
+  return BigInt(value).toString(10)
+}
+
+function formatTokenUnits(rawValue: bigint, decimals = 18): number {
+  const divisor = 10n ** BigInt(decimals)
+  const whole = rawValue / divisor
+  const fraction = rawValue % divisor
+
+  return Number(whole) + Number(fraction) / 10 ** decimals
 }
 
 export function toChecksumAddress(address: string): string {
@@ -69,6 +86,47 @@ export async function switchPaymentChain(chain: PaymentChain, provider = getEthe
       ]
     })
   }
+}
+
+export async function fetchAlephTokenBalance(address: string, chain: PaymentChain): Promise<number> {
+  const config = EVM_CHAIN_CONFIG[chain]
+  const contract = ALEPH_TOKEN_CONTRACTS[chain]
+  const callData = `0x70a08231000000000000000000000000${address.slice(2).toLowerCase()}`
+
+  const response = await fetchWithTimeout(
+    config.rpcUrls[0],
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'eth_call',
+        params: [
+          {
+            to: contract,
+            data: callData
+          },
+          'latest'
+        ]
+      })
+    },
+    10000
+  )
+
+  if (!response.ok) {
+    throw new Error(`Selected-chain balance request failed: ${response.status}`)
+  }
+
+  const payload = (await response.json()) as { result?: string; error?: { message?: string } }
+  if (payload.error?.message) {
+    throw new Error(payload.error.message)
+  }
+  if (!payload.result) {
+    throw new Error('Selected-chain balance request returned no result.')
+  }
+
+  return formatTokenUnits(BigInt(hexToDecimalString(payload.result)))
 }
 
 export async function personalSign(

@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
-import { connectWallet, personalSign, toChecksumAddress } from './wallet'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { connectWallet, fetchAlephTokenBalance, personalSign, toChecksumAddress } from './wallet'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('wallet helpers', () => {
   it('connects through an EIP-1193 provider', async () => {
@@ -37,5 +41,25 @@ describe('wallet helpers', () => {
       method: 'personal_sign',
       params: ['0x4554480a30786162630a494e5354414e43450a68617368', '0xabc']
     })
+  })
+
+  it('fetches the ALEPH token balance for a selected chain via JSON-RPC', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          result: '0x6c6b935b8bbd400000'
+        }),
+        { status: 200 }
+      )
+    )
+
+    const balance = await fetchAlephTokenBalance('0x822A6cc04c19eC6FA1167896658A87a449F4dd15', 'ETH')
+
+    expect(balance).toBe(2000)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const [, init] = fetchMock.mock.calls[0]
+    expect(init?.method).toBe('POST')
+    expect(String(init?.body)).toContain('"method":"eth_call"')
+    expect(String(init?.body)).toContain('70a08231')
   })
 })

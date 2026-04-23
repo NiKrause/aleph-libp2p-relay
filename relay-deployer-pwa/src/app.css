@@ -136,6 +136,14 @@ legend {
   background: #16a34a;
 }
 
+.status-item > span.pending {
+  background: #f59e0b;
+}
+
+.status-item > span.error {
+  background: #dc2626;
+}
+
 .status-item strong,
 .status-item small {
   display: block;
@@ -161,9 +169,45 @@ legend {
   display: block;
 }
 
+.metric-stack small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 .metric-stack strong {
   margin-top: 3px;
   overflow-wrap: anywhere;
+}
+
+.balance-panel {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.balance-panel strong,
+.balance-panel small,
+.balance-panel p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.balance-panel small,
+.balance-panel p {
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.balance-links {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .deploy-tool {
@@ -207,6 +251,12 @@ legend {
   padding: 0 17px;
   color: #ffffff;
   background: #0f172a;
+}
+
+.primary-button.caution {
+  color: #431407;
+  background: #fbbf24;
+  border-color: #f59e0b;
 }
 
 .secondary-button {
@@ -255,6 +305,12 @@ button svg {
   color: #7c2d12;
   background: #ffedd5;
   border: 1px solid #fed7aa;
+}
+
+.alert.info {
+  color: #0f3b66;
+  background: #e0f2fe;
+  border: 1px solid #bae6fd;
 }
 
 .form-grid {
@@ -342,7 +398,7 @@ textarea:focus {
 
 .quote-strip {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   margin: 18px 0;
 }
@@ -355,14 +411,117 @@ textarea:focus {
   background: #eff6ff;
 }
 
+.quote-strip div.quote-ok {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.quote-strip div.quote-danger {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
 .quote-strip strong,
 .quote-strip span {
   display: block;
   overflow-wrap: anywhere;
 }
 
+.quote-strip small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.quote-strip small.status-ok {
+  color: #166534;
+}
+
+.quote-strip small.status-danger {
+  color: #b91c1c;
+}
+
 .quote-strip strong {
   margin-top: 5px;
+}
+
+.hold-summary {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.hold-summary strong,
+.hold-summary span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.hold-summary span {
+  color: #64748b;
+}
+
+.hold-summary.hold-summary-ok {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.hold-summary.hold-summary-ok strong {
+  color: #166534;
+}
+
+.hold-summary.hold-summary-danger {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.hold-summary.hold-summary-danger strong {
+  color: #b91c1c;
+}
+
+.rootfs-panel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 18px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.rootfs-panel > div {
+  min-width: 0;
+}
+
+.rootfs-panel strong,
+.rootfs-panel span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.rootfs-panel strong {
+  margin-top: 4px;
+}
+
+.rootfs-links {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.rootfs-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #64748b;
+  line-height: 1.45;
 }
 
 .validation-list {
@@ -400,12 +559,53 @@ textarea:focus {
   padding: 16px;
   background: #ecfdf5;
   border-color: #bbf7d0;
+  align-items: flex-start;
+  flex-wrap: wrap;
 }
 
 .result-panel strong,
 .result-panel span {
   display: block;
   overflow-wrap: anywhere;
+}
+
+.result-panel.rejected-panel {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.result-panel.pending-panel {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.result-detail,
+.result-meta {
+  margin: 0;
+  flex: 1 1 100%;
+  line-height: 1.45;
+}
+
+.result-detail {
+  color: #7f1d1d;
+}
+
+.result-meta {
+  color: #64748b;
+}
+
+.result-references {
+  flex: 1 1 100%;
+}
+
+.result-references ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.result-references li {
+  color: #475569;
+  line-height: 1.5;
 }
 
 .result-panel nav {
@@ -431,6 +631,8 @@ textarea:focus {
 
 .instance-row {
   padding: 14px 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
 }
 
 .instance-row > div {
@@ -445,6 +647,99 @@ textarea:focus {
 
 .instance-row a {
   font-weight: 700;
+}
+
+.instance-actions {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.instance-links {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.instance-delete-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #b91c1c;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.instance-delete-button:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.instance-delete-button:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.instance-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.instance-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.instance-details {
+  flex: 1 1 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.instance-details > div {
+  min-width: 0;
+}
+
+.instance-details span,
+.instance-details strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.instance-details span {
+  color: #64748b;
+  font-size: 0.84rem;
+  margin-bottom: 4px;
+}
+
+.instance-details strong {
+  color: #0f172a;
+  font-size: 0.95rem;
+}
+
+.instance-feedback-info {
+  color: #1d4ed8 !important;
+}
+
+.instance-feedback-error {
+  color: #b91c1c !important;
+}
+
+.instance-detail-wide {
+  grid-column: 1 / -1;
 }
 
 .empty-state {
@@ -465,7 +760,8 @@ textarea:focus {
   }
 
   .form-grid,
-  .quote-strip {
+  .quote-strip,
+  .rootfs-panel {
     grid-template-columns: 1fr;
   }
 
@@ -481,6 +777,14 @@ textarea:focus {
   .instances-header > button,
   .result-panel nav {
     width: 100%;
+  }
+
+  .instance-actions {
+    justify-items: start;
+  }
+
+  .instance-links {
+    justify-content: flex-start;
   }
 
   .result-panel nav a {

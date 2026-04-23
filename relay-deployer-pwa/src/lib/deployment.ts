@@ -1,4 +1,5 @@
 import {
+  DEFAULT_BASE_ROOTFS,
   ALEPH_DEFAULT_CHANNEL,
   DEFAULT_PAYMENT_CHAIN,
   HOLD_MAX_COMPUTE_UNITS,
@@ -16,17 +17,21 @@ import type {
   PaymentQuote,
   PricingState,
   RootfsManifest,
+  RootfsResolution,
   Tier,
   TierSpec
 } from './types'
 
 const QUOTE_EPSILON = 1e-9
+const BYTES_PER_MIB = 1024 * 1024
 
 export const DEFAULT_DEPLOYMENT_FORM: DeploymentForm = {
   name: 'py-libp2p-relay',
   sshPublicKey: '',
   paymentMode: 'hold',
   paymentChain: DEFAULT_PAYMENT_CHAIN,
+  rootfsSourceMode: 'base',
+  baseRootfs: DEFAULT_BASE_ROOTFS,
   tierId: 'tier-1',
   selectedCrnHash: ''
 }
@@ -97,9 +102,19 @@ export function buildPaymentQuote(
   }
 }
 
+export function estimateRootfsStorageHolding(manifest: RootfsManifest | null, pricing: InstancePricing | null): number | null {
+  if (!manifest?.rootfsSourceSizeBytes || !pricing?.price?.storage?.holding) return null
+
+  const unitPrice = toNumber(pricing.price.storage.holding)
+  if (!Number.isFinite(unitPrice) || unitPrice <= 0) return null
+
+  return (manifest.rootfsSourceSizeBytes / BYTES_PER_MIB) * unitPrice
+}
+
 export function validateDeployment(args: {
   form: DeploymentForm
   manifest: RootfsManifest | null
+  rootfsResolution: RootfsResolution | null
   pricingState: PricingState
   balance: BalanceResponse | null
   crns: Crn[]
@@ -113,10 +128,24 @@ export function validateDeployment(args: {
   const tier = selectedTier(pricing, args.form.tierId)
   let quote: PaymentQuote | null = null
 
-  if (!args.manifest || !ITEM_HASH_RE.test(args.manifest.rootfsItemHash || '')) {
-    errors.push('A valid custom rootfs manifest is required.')
-  } else if (!args.rootfsVerified) {
-    errors.push('The rootfs ItemHash has not been verified on Aleph.')
+  if (args.form.rootfsSourceMode === 'custom') {
+    if (!args.manifest || !ITEM_HASH_RE.test(args.manifest.rootfsItemHash || '')) {
+      errors.push('A valid custom rootfs manifest is required.')
+    } else if (!args.rootfsVerified) {
+      errors.push('The rootfs ItemHash has not been verified on Aleph.')
+    } else if (args.rootfsResolution) {
+      if (args.rootfsResolution.messageStatus === 'pending') {
+        if (args.rootfsResolution.gatewayStatus === 'reachable') {
+          warnings.push(
+            'The rootfs STORE message is still pending on Aleph, but the CID gateway is reachable. Deploying now is allowed in caution mode.'
+          )
+        } else {
+          errors.push('The rootfs STORE message is pending on Aleph. Wait until it is processed before deploying.')
+        }
+      } else if (args.rootfsResolution.messageStatus !== 'processed') {
+        errors.push(`The rootfs STORE message is ${args.rootfsResolution.messageStatus} on Aleph. Wait until it is processed before deploying.`)
+      }
+    }
   }
 
   if (!args.form.name.trim()) errors.push('Instance name is required.')
@@ -165,11 +194,10 @@ export function validateDeployment(args: {
   }
 }
 
-export function createReleaseMetadata(name: string, manifest: RootfsManifest) {
+export function createReleaseMetadata(name: string, rootfsVersion: string) {
   return {
     name,
-    relay: 'py-libp2p',
-    rootfs_version: manifest.version,
+    rootfs_version: rootfsVersion,
     deployer: 'aleph-relay-deployer-pwa'
   }
 }
