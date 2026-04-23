@@ -1,5 +1,5 @@
 import { ALEPH_API_HOST, ALEPH_DEFAULT_CHANNEL } from './config'
-import { createAuthenticatedAlephHttpClient, inlineStorageEngine } from './alephSdk'
+import { broadcastAlephMessage } from './alephApi'
 import { sha256Hex } from './crypto'
 import { signaturePayload } from './alephMessage'
 import { personalSign } from './wallet'
@@ -79,50 +79,25 @@ export async function deleteInstance(args: {
   message: AlephBroadcastMessage
   response: AlephBroadcastResponse
 }> {
-  const client = await createAuthenticatedAlephHttpClient(undefined, ALEPH_API_HOST)
-  if (client.account.address.toLowerCase() !== args.sender.toLowerCase()) {
-    throw new Error('Connected wallet changed. Reconnect the wallet before deleting the instance.')
-  }
-
   try {
-    const sdkMessage = await client.forget({
-      channel: args.channel ?? ALEPH_DEFAULT_CHANNEL,
-      hashes: [args.instanceHash],
-      reason: args.reason?.trim(),
-      storageEngine: inlineStorageEngine(),
-      sync: false
+    const unsignedMessage = await createUnsignedForgetMessage({
+      sender: args.sender,
+      content: createForgetContent({
+        address: args.sender,
+        hashes: [args.instanceHash],
+        reason: args.reason
+      }),
+      channel: args.channel ?? ALEPH_DEFAULT_CHANNEL
     })
-
-    const message = {
-      chain: sdkMessage.chain,
-      channel: sdkMessage.channel ?? args.channel ?? ALEPH_DEFAULT_CHANNEL,
-      item_content:
-        sdkMessage.item_content ??
-        JSON.stringify(
-          createForgetContent({
-            address: args.sender,
-            hashes: [args.instanceHash],
-            reason: args.reason
-          })
-        ),
-      item_hash: sdkMessage.item_hash,
-      item_type: sdkMessage.item_type,
-      sender: sdkMessage.sender,
-      signature: sdkMessage.signature,
-      time: sdkMessage.time,
-      type: sdkMessage.type
-    } as AlephBroadcastMessage
+    const message = await signForgetMessage(unsignedMessage)
+    const { response, httpStatus } = await broadcastAlephMessage(message, ALEPH_API_HOST, false)
+    const status = normalizeStatus(httpStatus, response.message_status)
 
     return {
       itemHash: message.item_hash,
-      status: 'pending',
+      status,
       message,
-      response: {
-        message_status: 'pending',
-        publication_status: {
-          status: 'submitted'
-        }
-      }
+      response
     }
   } catch (error) {
     const status = normalizeSdkStatus(error)

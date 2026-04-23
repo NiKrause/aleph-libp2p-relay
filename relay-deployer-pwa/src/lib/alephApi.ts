@@ -224,22 +224,35 @@ function manualAllocation(instance: InstanceMessage, crns: Crn[]): InstanceAlloc
   }
 }
 
-async function fetchCrnExecutionMap(crnUrl: string): Promise<CrnExecutionMapPayload> {
-  const v2Response = await fetchWithTimeout(`${crnUrl}/v2/about/executions/list`, { cache: 'no-cache' })
-  if (v2Response.ok) {
-    return (await v2Response.json()) as CrnExecutionMapPayload
+async function fetchCrnExecutionMap(crnUrl: string): Promise<CrnExecutionMapPayload | null> {
+  const normalizedCrnUrl = crnUrl.replace(/\/+$/, '')
+
+  // CRN execution lists are only used to enrich the UI. Some CRNs do not expose
+  // browser-friendly CORS headers or do not implement either endpoint, so we
+  // treat those failures as "runtime details unavailable" rather than errors.
+  try {
+    const v2Response = await fetchWithTimeout(`${normalizedCrnUrl}/v2/about/executions/list`, { cache: 'no-cache' })
+    if (v2Response.ok) {
+      return (await v2Response.json()) as CrnExecutionMapPayload
+    }
+
+    if (v2Response.status !== 404) {
+      return null
+    }
+  } catch {
+    return null
   }
 
-  if (v2Response.status !== 404) {
-    throw new Error(`CRN execution request failed: ${v2Response.status}`)
-  }
+  try {
+    const v1Response = await fetchWithTimeout(`${normalizedCrnUrl}/about/executions/list`, { cache: 'no-cache' })
+    if (!v1Response.ok) {
+      return null
+    }
 
-  const v1Response = await fetchWithTimeout(`${crnUrl}/about/executions/list`, { cache: 'no-cache' })
-  if (!v1Response.ok) {
-    throw new Error(`CRN execution request failed: ${v1Response.status}`)
+    return (await v1Response.json()) as CrnExecutionMapPayload
+  } catch {
+    return null
   }
-
-  return (await v1Response.json()) as CrnExecutionMapPayload
 }
 
 function normalizeExecution(item: CrnExecutionV1Payload | CrnExecutionV2Payload, crnUrl: string): InstanceExecution {
@@ -301,7 +314,7 @@ export async function fetchInstanceRuntimeDetails(
   instances: InstanceMessage[],
   crns: Crn[]
 ): Promise<Record<string, InstanceRuntimeDetails>> {
-  const executionMapCache = new Map<string, Promise<CrnExecutionMapPayload>>()
+  const executionMapCache = new Map<string, Promise<CrnExecutionMapPayload | null>>()
 
   async function inspectInstance(instance: InstanceMessage): Promise<InstanceRuntimeDetails> {
     const messageStatus = normalizeMessageStatus(instance.status ?? (instance.confirmed ? 'processed' : undefined))
@@ -338,7 +351,7 @@ export async function fetchInstanceRuntimeDetails(
       }
 
       const executionMap = await executionPromise
-      const executionPayload = executionMap[instance.item_hash]
+      const executionPayload = executionMap?.[instance.item_hash]
       if (executionPayload) {
         details.execution = normalizeExecution(executionPayload, crnUrl)
       }

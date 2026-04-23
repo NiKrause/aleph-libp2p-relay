@@ -65,6 +65,7 @@
   const paymentChains: DeploymentForm['paymentChain'][] = ['ETH', 'BASE', 'AVAX']
   const rootfsSourceModes: DeploymentForm['rootfsSourceMode'][] = ['base', 'custom']
   const SSH_PUBLIC_KEY_STORAGE_KEY = 'aleph-relay-deployer:ssh-public-key'
+  const ALEPH_SCHEDULER_ALLOCATION_BASE_URL = 'https://scheduler.api.aleph.cloud/api/v0/allocation'
 
   $: pricing = pricingState.pricing
   $: tier = selectedTier(pricing, form.tierId)
@@ -493,6 +494,13 @@
     return instance.content?.metadata?.name || 'Aleph instance'
   }
 
+  type InstanceStageTone = 'ok' | 'pending' | 'muted' | 'error'
+
+  interface InstanceStageSummary {
+    label: string
+    tone: InstanceStageTone
+  }
+
   function instanceStatusLabel(instance: InstanceMessage) {
     const details = instanceDetails[instance.item_hash]
     const status = (details?.messageStatus ?? instance.status ?? '').toLowerCase()
@@ -523,6 +531,51 @@
     return execution.version === 'v1' ? 'Running' : 'Allocated'
   }
 
+  function instanceMessageStage(instance: InstanceMessage): InstanceStageSummary {
+    const status = (instanceDetails[instance.item_hash]?.messageStatus ?? instance.status ?? '').toLowerCase()
+
+    if (status === 'processed') return { label: 'Processed on Aleph', tone: 'ok' }
+    if (status === 'pending') return { label: 'Pending confirmation', tone: 'pending' }
+    if (status === 'rejected') return { label: 'Rejected by Aleph', tone: 'error' }
+    if (status === 'removing') return { label: 'Delete requested', tone: 'pending' }
+    return { label: 'Message status unavailable', tone: 'muted' }
+  }
+
+  function instanceAllocationStage(instance: InstanceMessage): InstanceStageSummary {
+    const details = instanceDetails[instance.item_hash]
+
+    if (details?.execution) return { label: 'Execution listed on CRN', tone: 'ok' }
+    if (details?.allocation?.source === 'scheduler' && details.allocation.crnUrl) {
+      return { label: 'Allocated by scheduler', tone: 'ok' }
+    }
+    if (details?.allocation?.source === 'manual' && details.allocation.crnUrl) {
+      return { label: 'Requested CRN only', tone: 'pending' }
+    }
+    if (details?.messageStatus === 'processed') return { label: 'Allocation not reported yet', tone: 'pending' }
+    return { label: 'Waiting for Aleph processing', tone: 'muted' }
+  }
+
+  function instanceRuntimeStage(instance: InstanceMessage): InstanceStageSummary {
+    const details = instanceDetails[instance.item_hash]
+    const execution = details?.execution
+    const status = execution?.status
+
+    if (status?.stopped_at) return { label: 'Stopped', tone: 'muted' }
+    if (status?.stopping_at) return { label: 'Stopping', tone: 'pending' }
+    if (status?.started_at || execution?.running) return { label: 'Running', tone: 'ok' }
+    if (status?.starting_at) return { label: 'Starting', tone: 'pending' }
+    if (status?.prepared_at) return { label: 'Prepared', tone: 'pending' }
+    if (status?.preparing_at || status?.defined_at) return { label: 'Preparing', tone: 'pending' }
+    if (details?.allocation?.source === 'scheduler' && details.allocation.crnUrl) {
+      return { label: 'Allocated, awaiting CRN details', tone: 'pending' }
+    }
+    if (details?.allocation?.source === 'manual' && details.allocation.crnUrl) {
+      return { label: 'Not visible on selected CRN yet', tone: 'pending' }
+    }
+    if (details?.messageStatus === 'processed') return { label: 'Runtime not available yet', tone: 'pending' }
+    return { label: 'Runtime not available', tone: 'muted' }
+  }
+
   function instanceConfirmedAt(instance: InstanceMessage) {
     return instance.reception_time || instanceDetails[instance.item_hash]?.execution?.status?.started_at || null
   }
@@ -548,6 +601,26 @@
     return details?.execution?.networking?.ipv6_ip || details?.execution?.networking?.ipv6 || details?.allocation?.vmIpv6 || null
   }
 
+  function instanceSchedulerUrl(instance: InstanceMessage) {
+    return `${ALEPH_SCHEDULER_ALLOCATION_BASE_URL}/${instance.item_hash}`
+  }
+
+  function instanceCrnExecutionListUrl(instance: InstanceMessage) {
+    const crnUrl = instanceDetails[instance.item_hash]?.allocation?.crnUrl
+    return crnUrl ? `${crnUrl.replace(/\/+$/, '')}/v2/about/executions/list` : null
+  }
+
+  function instanceRequestedNodeHash(instance: InstanceMessage) {
+    return instance.content?.requirements?.node?.node_hash ?? null
+  }
+
+  function instanceAllocationSourceLabel(instance: InstanceMessage) {
+    const source = instanceDetails[instance.item_hash]?.allocation?.source
+    if (source === 'scheduler') return 'scheduler'
+    if (source === 'manual') return 'deploy message'
+    return null
+  }
+
   function instanceSshCommand(instance: InstanceMessage) {
     const details = instanceDetails[instance.item_hash]
     const networking = details?.execution?.networking
@@ -569,8 +642,11 @@
     const crnLabel = instanceCrnLabel(instance)
 
     if (details?.execution) return null
-    if (details?.allocation?.crnUrl && crnLabel) {
+    if (details?.allocation?.source === 'scheduler' && details.allocation.crnUrl && crnLabel) {
       return `${crnLabel} has been selected, but it is not exposing this VM in its execution list yet.`
+    }
+    if (details?.allocation?.source === 'manual' && details.allocation.crnUrl && crnLabel) {
+      return `${crnLabel} was requested in the deployment, but Aleph has not reported an allocation for this VM yet.`
     }
     if (details?.messageStatus === 'processed') {
       return 'This deployment is confirmed on Aleph, but runtime allocation details are not available yet.'
@@ -1094,6 +1170,11 @@
 
     <div class="instance-list">
       {#each instances as instance}
+        {@const details = instanceDetails[instance.item_hash]}
+        {@const messageStage = instanceMessageStage(instance)}
+        {@const allocationStage = instanceAllocationStage(instance)}
+        {@const runtimeStage = instanceRuntimeStage(instance)}
+        {@const crnExecutionsUrl = instanceCrnExecutionListUrl(instance)}
         <article class="instance-row">
           <div>
             <strong>{instanceName(instance)}</strong>
@@ -1112,7 +1193,12 @@
           <div class="instance-actions">
             <span>{instance.content?.payment?.type ?? '-'}</span>
             <div class="instance-links">
-              <a href={explorerUrl(instance.sender, instance.item_hash)} target="_blank" rel="noreferrer">Open</a>
+              <a href={explorerUrl(instance.sender, instance.item_hash)} target="_blank" rel="noreferrer">Explorer</a>
+              <a href={apiMessageUrl(instance.item_hash)} target="_blank" rel="noreferrer">API</a>
+              <a href={instanceSchedulerUrl(instance)} target="_blank" rel="noreferrer">Scheduler</a>
+              {#if crnExecutionsUrl}
+                <a href={crnExecutionsUrl} target="_blank" rel="noreferrer">CRN</a>
+              {/if}
               <button
                 class="instance-delete-button"
                 type="button"
@@ -1125,6 +1211,36 @@
             </div>
           </div>
           <div class="instance-details">
+            <div class={`instance-stage-card instance-stage-${messageStage.tone}`}>
+              <span>Aleph message</span>
+              <strong>{messageStage.label}</strong>
+            </div>
+            <div class={`instance-stage-card instance-stage-${allocationStage.tone}`}>
+              <span>Allocation</span>
+              <strong>{allocationStage.label}</strong>
+            </div>
+            <div class={`instance-stage-card instance-stage-${runtimeStage.tone}`}>
+              <span>Runtime</span>
+              <strong>{runtimeStage.label}</strong>
+            </div>
+            {#if instanceCrnLabel(instance)}
+              <div>
+                <span>CRN</span>
+                <strong>{instanceCrnLabel(instance)}</strong>
+              </div>
+            {/if}
+            {#if instanceAllocationSourceLabel(instance)}
+              <div>
+                <span>Allocation source</span>
+                <strong>{instanceAllocationSourceLabel(instance)}</strong>
+              </div>
+            {/if}
+            {#if instanceRequestedNodeHash(instance)}
+              <div>
+                <span>Requested node</span>
+                <strong>{shortHash(instanceRequestedNodeHash(instance) ?? '')}</strong>
+              </div>
+            {/if}
             {#if instanceIpv4(instance)}
               <div>
                 <span>Host IPv4</span>
@@ -1137,16 +1253,22 @@
                 <strong>{instanceIpv6(instance)}</strong>
               </div>
             {/if}
-            {#if instanceDetails[instance.item_hash]?.execution?.networking?.ipv4_ip}
+            {#if details?.execution?.networking?.ipv4_ip}
               <div>
                 <span>VM IPv4</span>
-                <strong>{instanceDetails[instance.item_hash].execution?.networking?.ipv4_ip}</strong>
+                <strong>{details.execution?.networking?.ipv4_ip}</strong>
               </div>
             {/if}
-            {#if instanceDetails[instance.item_hash]?.execution?.status?.started_at}
+            {#if details?.execution?.status?.started_at}
               <div>
                 <span>Started</span>
-                <strong>{dateLabel(instanceDetails[instance.item_hash].execution?.status?.started_at ?? undefined)}</strong>
+                <strong>{dateLabel(details.execution?.status?.started_at ?? undefined)}</strong>
+              </div>
+            {/if}
+            {#if details?.allocation?.period?.start_timestamp}
+              <div>
+                <span>Allocation start</span>
+                <strong>{dateLabel(details.allocation.period.start_timestamp)}</strong>
               </div>
             {/if}
             {#if instanceSshCommand(instance)}
@@ -1167,6 +1289,17 @@
                 <strong>{runtimeDetailsNote(instance)}</strong>
               </div>
             {/if}
+            <div class="instance-detail-wide">
+              <span>Inspect</span>
+              <div class="instance-detail-links">
+                <a href={explorerUrl(instance.sender, instance.item_hash)} target="_blank" rel="noreferrer">Explorer</a>
+                <a href={apiMessageUrl(instance.item_hash)} target="_blank" rel="noreferrer">Aleph API</a>
+                <a href={instanceSchedulerUrl(instance)} target="_blank" rel="noreferrer">Scheduler allocation</a>
+                {#if crnExecutionsUrl}
+                  <a href={crnExecutionsUrl} target="_blank" rel="noreferrer">CRN executions</a>
+                {/if}
+              </div>
+            </div>
             {#if instanceActionFeedback[instance.item_hash]}
               <div class="instance-detail-wide">
                 <span>Delete</span>
@@ -1178,10 +1311,10 @@
                 </strong>
               </div>
             {/if}
-            {#if instanceDetails[instance.item_hash]?.error}
+            {#if details?.error}
               <div class="instance-detail-wide">
                 <span>Details</span>
-                <strong>{instanceDetails[instance.item_hash].error}</strong>
+                <strong>{details.error}</strong>
               </div>
             {/if}
           </div>

@@ -312,4 +312,48 @@ describe('Aleph API client', () => {
       }
     })
   })
+
+  it('treats browser-blocked CRN execution lookups as optional runtime details', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    const details = await fetchInstanceRuntimeDetails(
+      [
+        {
+          item_hash: 'd'.repeat(64),
+          sender: '0xabc',
+          chain: 'ETH',
+          type: 'INSTANCE',
+          status: 'processed',
+          content: {
+            payment: { type: 'credit', chain: 'ETH' },
+            requirements: {
+              node: {
+                node_hash: 'e'.repeat(64)
+              }
+            }
+          }
+        }
+      ],
+      [
+        {
+          hash: 'e'.repeat(64),
+          name: 'Selected CRN',
+          address: 'https://selected-crn.example'
+        }
+      ]
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0][0])).toContain('https://selected-crn.example/v2/about/executions/list')
+    expect(details['d'.repeat(64)]).toMatchObject({
+      messageStatus: 'processed',
+      allocation: {
+        source: 'manual',
+        crnHash: 'e'.repeat(64),
+        crnUrl: 'https://selected-crn.example'
+      },
+      execution: null,
+      error: null
+    })
+  })
 })

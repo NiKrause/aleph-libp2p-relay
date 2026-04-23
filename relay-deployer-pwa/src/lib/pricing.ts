@@ -1,5 +1,5 @@
-import { createAlephHttpClient } from './alephSdk'
 import { ALEPH_AGGREGATE_ADDRESS, ALEPH_API_HOST } from './config'
+import { fetchWithTimeout } from './http'
 import type { InstancePricing, PricingState } from './types'
 
 export function parseInstancePricing(payload: unknown): InstancePricing {
@@ -18,8 +18,20 @@ export function parseInstancePricing(payload: unknown): InstancePricing {
 }
 
 export async function fetchInstancePricing(apiHost = ALEPH_API_HOST): Promise<PricingState> {
-  const client = createAlephHttpClient(apiHost)
-  const pricingAggregate = await client.fetchAggregate<Record<string, unknown>>(ALEPH_AGGREGATE_ADDRESS, 'pricing')
+  const response = await fetchWithTimeout(`${apiHost}/api/v0/aggregates/${ALEPH_AGGREGATE_ADDRESS}.json?keys=pricing`, {
+    cache: 'no-cache'
+  })
+
+  if (!response.ok) {
+    throw new Error(`Pricing aggregate request failed: ${response.status}`)
+  }
+
+  const payload = (await response.json()) as { data?: Record<string, unknown> }
+  const pricingAggregate = payload.data?.pricing as Record<string, unknown> | undefined
+
+  if (!pricingAggregate) {
+    throw new Error('Pricing aggregate response did not include a pricing key.')
+  }
 
   return {
     pricing: parseInstancePricing({ pricing: pricingAggregate }),

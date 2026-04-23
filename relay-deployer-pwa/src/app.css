@@ -713,6 +713,33 @@ textarea:focus {
   min-width: 0;
 }
 
+.instance-stage-card {
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.instance-stage-card.instance-stage-ok {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.instance-stage-card.instance-stage-pending {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.instance-stage-card.instance-stage-muted {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.instance-stage-card.instance-stage-error {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
 .instance-details span,
 .instance-details strong {
   display: block;
@@ -736,6 +763,16 @@ textarea:focus {
 
 .instance-feedback-error {
   color: #b91c1c !important;
+}
+
+.instance-detail-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.instance-detail-links a {
+  font-weight: 700;
 }
 
 .instance-detail-wide {
