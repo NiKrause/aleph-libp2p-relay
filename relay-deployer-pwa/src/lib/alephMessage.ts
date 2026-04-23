@@ -1,6 +1,7 @@
-import { ALEPH_BASE_ROOTFS_ITEM_HASHES, ALEPH_DEFAULT_CHANNEL } from './config'
+import { ALEPH_BASE_ROOTFS_ITEM_HASHES, ALEPH_API_HOST, ALEPH_DEFAULT_CHANNEL } from './config'
+import { createAuthenticatedAlephHttpClient, toSdkBlockchain, toSdkPaymentType } from './alephSdk'
+import { HypervisorType } from '@aleph-sdk/message'
 import { sha256Hex } from './crypto'
-import { broadcastInstanceMessage } from './alephApi'
 import { createReleaseMetadata, tierSpec } from './deployment'
 import { personalSign } from './wallet'
 import type {
@@ -128,6 +129,12 @@ function normalizeStatus(httpStatus: number, responseStatus: unknown): MessageSt
   return 'unknown'
 }
 
+function normalizeSdkStatus(error: unknown): MessageStatus {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
+  if (message.includes('rejected')) return 'rejected'
+  return 'unknown'
+}
+
 export async function deployInstance(args: {
   sender: string
   form: DeploymentForm
@@ -145,18 +152,84 @@ export async function deployInstance(args: {
     tier: args.tier,
     selectedCrn: args.selectedCrn
   })
-  const unsignedMessage = await createUnsignedInstanceMessage({
-    sender: args.sender,
-    content,
-    channel: args.channel
-  })
-  const message = await signInstanceMessage(unsignedMessage)
-  const { response, httpStatus } = await broadcastInstanceMessage(message)
 
-  return {
-    itemHash: message.item_hash,
-    status: normalizeStatus(httpStatus, response.message_status),
-    message,
-    response
+  const client = await createAuthenticatedAlephHttpClient(undefined, ALEPH_API_HOST)
+  if (client.account.address.toLowerCase() !== args.sender.toLowerCase()) {
+    throw new Error('Connected wallet changed. Reconnect the wallet before deploying.')
+  }
+
+  try {
+    const sdkMessage = await client.createInstance({
+      channel: args.channel ?? ALEPH_DEFAULT_CHANNEL,
+      authorized_keys: content.authorized_keys,
+      environment: {
+        aleph_api: content.environment.aleph_api,
+        hypervisor: HypervisorType.qemu,
+        internet: content.environment.internet,
+        reproducible: false,
+        shared_cache: false
+      },
+      metadata: content.metadata,
+      payment: {
+        chain: toSdkBlockchain(content.payment.chain ?? args.form.paymentChain),
+        type: toSdkPaymentType(content.payment.type)
+      },
+      requirements: content.requirements,
+      resources: content.resources,
+      rootfs: {
+        parent: {
+          ref: content.rootfs.parent.ref
+        },
+        size_mib: content.rootfs.size_mib
+      },
+      sync: false,
+      volumes: []
+    })
+
+    const message = {
+      chain: sdkMessage.chain,
+      channel: sdkMessage.channel ?? args.channel ?? ALEPH_DEFAULT_CHANNEL,
+      item_content: sdkMessage.item_content ?? JSON.stringify(content),
+      item_hash: sdkMessage.item_hash,
+      item_type: sdkMessage.item_type,
+      sender: sdkMessage.sender,
+      signature: sdkMessage.signature,
+      time: sdkMessage.time,
+      type: sdkMessage.type
+    } as AlephBroadcastMessage
+
+    return {
+      itemHash: message.item_hash,
+      status: 'pending',
+      message,
+      response: {
+        message_status: 'pending',
+        publication_status: {
+          status: 'submitted'
+        }
+      }
+    }
+  } catch (error) {
+    const status = normalizeSdkStatus(error)
+    return {
+      itemHash: '',
+      status,
+      message: {
+        sender: args.sender,
+        chain: 'ETH',
+        signature: '',
+        type: 'INSTANCE',
+        item_hash: '',
+        item_type: 'inline',
+        item_content: JSON.stringify(content),
+        time: Date.now() / 1000,
+        channel: args.channel ?? ALEPH_DEFAULT_CHANNEL
+      },
+      response: {
+        message_status: status,
+        details: error instanceof Error ? error.message : String(error)
+      },
+      rejectionReason: error instanceof Error ? error.message : String(error)
+    }
   }
 }

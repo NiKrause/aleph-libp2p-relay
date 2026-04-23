@@ -193,7 +193,7 @@ export interface AlephForgetContent {
   address: string
   time: number
   hashes: string[]
-  aggregates: string[]
+  aggregates?: string[]
   reason?: string
 }
 

@@ -15,7 +15,6 @@ describe('Aleph forget helpers', () => {
       address: '0xabc',
       time: 10,
       hashes: ['f'.repeat(64)],
-      aggregates: [],
       reason: 'Deleted from the PWA'
     })
   })
@@ -38,7 +37,6 @@ describe('Aleph forget helpers', () => {
       address: '0xabc',
       time: 10,
       hashes: ['f'.repeat(64)],
-      aggregates: [],
       reason: 'Deleted from the PWA'
     })
   })

@@ -1,5 +1,5 @@
-import { ALEPH_DEFAULT_CHANNEL } from './config'
-import { broadcastAlephMessage } from './alephApi'
+import { ALEPH_API_HOST, ALEPH_DEFAULT_CHANNEL } from './config'
+import { createAuthenticatedAlephHttpClient, inlineStorageEngine } from './alephSdk'
 import { sha256Hex } from './crypto'
 import { signaturePayload } from './alephMessage'
 import { personalSign } from './wallet'
@@ -15,7 +15,6 @@ export function createForgetContent(args: {
     address: args.address,
     time: args.now ?? Date.now() / 1000,
     hashes: args.hashes,
-    aggregates: [],
     reason: args.reason?.trim() || undefined
   }
 }
@@ -63,6 +62,12 @@ function normalizeStatus(httpStatus: number, responseStatus: unknown): MessageSt
   return 'unknown'
 }
 
+function normalizeSdkStatus(error: unknown): MessageStatus {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
+  if (message.includes('rejected')) return 'rejected'
+  return 'unknown'
+}
+
 export async function deleteInstance(args: {
   sender: string
   instanceHash: string
@@ -74,23 +79,77 @@ export async function deleteInstance(args: {
   message: AlephBroadcastMessage
   response: AlephBroadcastResponse
 }> {
-  const content = createForgetContent({
-    address: args.sender,
-    hashes: [args.instanceHash],
-    reason: args.reason
-  })
-  const unsignedMessage = await createUnsignedForgetMessage({
-    sender: args.sender,
-    content,
-    channel: args.channel
-  })
-  const message = await signForgetMessage(unsignedMessage)
-  const { response, httpStatus } = await broadcastAlephMessage(message)
+  const client = await createAuthenticatedAlephHttpClient(undefined, ALEPH_API_HOST)
+  if (client.account.address.toLowerCase() !== args.sender.toLowerCase()) {
+    throw new Error('Connected wallet changed. Reconnect the wallet before deleting the instance.')
+  }
 
-  return {
-    itemHash: message.item_hash,
-    status: normalizeStatus(httpStatus, response.message_status),
-    message,
-    response
+  try {
+    const sdkMessage = await client.forget({
+      channel: args.channel ?? ALEPH_DEFAULT_CHANNEL,
+      hashes: [args.instanceHash],
+      reason: args.reason?.trim(),
+      storageEngine: inlineStorageEngine(),
+      sync: false
+    })
+
+    const message = {
+      chain: sdkMessage.chain,
+      channel: sdkMessage.channel ?? args.channel ?? ALEPH_DEFAULT_CHANNEL,
+      item_content:
+        sdkMessage.item_content ??
+        JSON.stringify(
+          createForgetContent({
+            address: args.sender,
+            hashes: [args.instanceHash],
+            reason: args.reason
+          })
+        ),
+      item_hash: sdkMessage.item_hash,
+      item_type: sdkMessage.item_type,
+      sender: sdkMessage.sender,
+      signature: sdkMessage.signature,
+      time: sdkMessage.time,
+      type: sdkMessage.type
+    } as AlephBroadcastMessage
+
+    return {
+      itemHash: message.item_hash,
+      status: 'pending',
+      message,
+      response: {
+        message_status: 'pending',
+        publication_status: {
+          status: 'submitted'
+        }
+      }
+    }
+  } catch (error) {
+    const status = normalizeSdkStatus(error)
+    return {
+      itemHash: '',
+      status,
+      message: {
+        sender: args.sender,
+        chain: 'ETH',
+        signature: '',
+        type: 'FORGET',
+        item_hash: '',
+        item_type: 'inline',
+        item_content: JSON.stringify(
+          createForgetContent({
+            address: args.sender,
+            hashes: [args.instanceHash],
+            reason: args.reason
+          })
+        ),
+        time: Date.now() / 1000,
+        channel: args.channel ?? ALEPH_DEFAULT_CHANNEL
+      },
+      response: {
+        message_status: status,
+        details: error instanceof Error ? error.message : String(error)
+      }
+    }
   }
 }
