@@ -125,6 +125,23 @@ build_with_docker() {
     bash rootfs/build-rootfs-image.sh
 }
 
+required_port_forwards_json() {
+  case "${ROOTFS_PROFILE}" in
+    orbitdb-relay-pinner)
+      cat <<'EOF'
+  "requiredPortForwards": [
+    { "port": 22, "tcp": true, "udp": false, "purpose": "SSH" },
+    { "port": 9090, "tcp": true, "udp": false, "purpose": "Metrics and health API" },
+    { "port": 9091, "tcp": true, "udp": false, "purpose": "libp2p TCP" },
+    { "port": 9092, "tcp": true, "udp": false, "purpose": "libp2p WebSocket" },
+    { "port": 9093, "tcp": false, "udp": true, "purpose": "WebRTC direct" },
+    { "port": 9094, "tcp": false, "udp": true, "purpose": "QUIC" }
+  ],
+EOF
+      ;;
+  esac
+}
+
 write_manifest() {
   local rootfs_item_hash="$1"
   local rootfs_source_size_bytes=""
@@ -163,7 +180,7 @@ PY
   "rootfsInstallStrategy": "${ROOTFS_INSTALL_MODE}",
   "requiresBootstrapNetwork": ${requires_bootstrap_network},
   "bootstrapSummary": "${bootstrap_summary}",
-$(if [[ "${rootfs_source_size_bytes}" =~ ^[0-9]+$ ]]; then printf '  "rootfsSourceSizeBytes": %s,\n' "${rootfs_source_size_bytes}"; fi)  "rootfsItemHash": "${rootfs_item_hash}",
+$(if [[ "${rootfs_source_size_bytes}" =~ ^[0-9]+$ ]]; then printf '  "rootfsSourceSizeBytes": %s,\n' "${rootfs_source_size_bytes}"; fi)$(required_port_forwards_json)  "rootfsItemHash": "${rootfs_item_hash}",
   "rootfsSizeMiB": ${ROOTFS_SIZE_MIB},
   "createdAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }

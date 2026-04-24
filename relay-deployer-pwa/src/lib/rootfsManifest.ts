@@ -28,6 +28,28 @@ export function validateRootfsManifest(manifest: RootfsManifest | null): RootfsM
   if (manifest.bootstrapSummary != null && !manifest.bootstrapSummary.trim()) {
     errors.push('Rootfs bootstrap summary must be non-empty when provided.')
   }
+  if (manifest.requiredPortForwards != null) {
+    if (!Array.isArray(manifest.requiredPortForwards)) {
+      errors.push('Rootfs required port forwards must be an array when provided.')
+    } else {
+      manifest.requiredPortForwards.forEach((entry, index) => {
+        if (!entry || typeof entry !== 'object') {
+          errors.push(`Rootfs required port forward #${index + 1} must be an object.`)
+          return
+        }
+
+        if (!Number.isInteger(entry.port) || entry.port < 1 || entry.port > 65535) {
+          errors.push(`Rootfs required port forward #${index + 1} must use a TCP/UDP port between 1 and 65535.`)
+        }
+        if (entry.tcp !== true && entry.udp !== true) {
+          errors.push(`Rootfs required port forward #${index + 1} must enable TCP or UDP.`)
+        }
+        if (entry.purpose != null && (typeof entry.purpose !== 'string' || !entry.purpose.trim())) {
+          errors.push(`Rootfs required port forward #${index + 1} purpose must be non-empty when provided.`)
+        }
+      })
+    }
+  }
   if (!ITEM_HASH_RE.test(manifest.rootfsItemHash || '')) {
     errors.push('Rootfs ItemHash must be a 64 character hex value.')
   }

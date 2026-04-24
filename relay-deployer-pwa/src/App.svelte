@@ -21,6 +21,7 @@
   } from './lib/deployment'
   import { crnDisplayLabel, explorerUrl, apiMessageUrl, dateLabel, formatNumber, shortHash } from './lib/format'
   import { fetchInstancePricing, holdSupportedTiers } from './lib/pricing'
+  import { ensureInstancePortForwards, portForwardLabel } from './lib/portForwarding'
   import { loadRootfsManifest, resolveRootfsReference, verifyRootfsExists } from './lib/rootfsManifest'
   import { connectWallet, fetchAlephTokenBalance, switchPaymentChain, type WalletState } from './lib/wallet'
   import {
@@ -485,23 +486,45 @@
         }
       }
 
+      const feedbackMessages: string[] = []
+      let feedbackTone: 'info' | 'error' = 'info'
+
+      if (deploymentResult.status === 'processed') {
+        try {
+          statusText = 'Configuring port forwards'
+          const portForwardResult = await ensureInstancePortForwards({
+            sender: wallet.address,
+            instanceItemHash: deploymentResult.itemHash,
+            manifest: usingBaseRootfs ? null : rootfsState.manifest
+          })
+          const requestedPorts = portForwardResult.requestedPorts.map(portForwardLabel).join(', ')
+          feedbackMessages.push(
+            portForwardResult.aggregateStatus === 'pending'
+              ? `Port forwards submitted: ${requestedPorts}.`
+              : `Port forwards configured: ${requestedPorts}.`
+          )
+        } catch (error) {
+          feedbackTone = 'error'
+          feedbackMessages.push(`Port forward setup failed: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+
       if (deploymentResult.status === 'processed' && form.paymentMode === 'credit' && selectedCrn?.address) {
         try {
           const feedbackMessage = await requestCrnStart(deploymentResult.itemHash, selectedCrn.address)
-          instanceActionFeedback = {
-            ...instanceActionFeedback,
-            [deploymentResult.itemHash]: {
-              tone: 'info',
-              message: feedbackMessage
-            }
-          }
+          feedbackMessages.push(feedbackMessage)
         } catch (error) {
-          instanceActionFeedback = {
-            ...instanceActionFeedback,
-            [deploymentResult.itemHash]: {
-              tone: 'error',
-              message: error instanceof Error ? error.message : String(error)
-            }
+          feedbackTone = 'error'
+          feedbackMessages.push(error instanceof Error ? error.message : String(error))
+        }
+      }
+
+      if (deploymentResult.status === 'processed' && feedbackMessages.length > 0) {
+        instanceActionFeedback = {
+          ...instanceActionFeedback,
+          [deploymentResult.itemHash]: {
+            tone: feedbackTone,
+            message: feedbackMessages.join(' ')
           }
         }
       }

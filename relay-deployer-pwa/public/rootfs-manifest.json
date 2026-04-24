@@ -4,6 +4,14 @@
   "rootfsInstallStrategy": "thin",
   "requiresBootstrapNetwork": true,
   "bootstrapSummary": "First boot installs runtime packages and application dependencies. Outbound network access is required before the relay service becomes healthy.",
+  "requiredPortForwards": [
+    { "port": 22, "tcp": true, "udp": false, "purpose": "SSH" },
+    { "port": 9090, "tcp": true, "udp": false, "purpose": "Metrics and health API" },
+    { "port": 9091, "tcp": true, "udp": false, "purpose": "libp2p TCP" },
+    { "port": 9092, "tcp": true, "udp": false, "purpose": "libp2p WebSocket" },
+    { "port": 9093, "tcp": false, "udp": true, "purpose": "WebRTC direct" },
+    { "port": 9094, "tcp": false, "udp": true, "purpose": "QUIC" }
+  ],
   "rootfsSourceSizeBytes": 352780288,
   "rootfsItemHash": "c1b84d3418796ff2f897e2783246b1af8b8531425fd0bf69584a049590183c4f",
   "rootfsSizeMiB": 20480,

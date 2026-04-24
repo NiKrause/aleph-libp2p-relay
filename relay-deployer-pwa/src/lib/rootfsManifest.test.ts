@@ -13,6 +13,10 @@ describe('validateRootfsManifest', () => {
       rootfsInstallStrategy: 'thin',
       requiresBootstrapNetwork: true,
       bootstrapSummary: 'First boot installs runtime packages and dependencies.',
+      requiredPortForwards: [
+        { port: 22, tcp: true, udp: false, purpose: 'SSH' },
+        { port: 9091, tcp: true, udp: false, purpose: 'libp2p TCP' }
+      ],
       rootfsItemHash: 'f'.repeat(64),
       rootfsSizeMiB: 20480,
       rootfsSourceSizeBytes: 2445860819,
@@ -59,6 +63,25 @@ describe('validateRootfsManifest', () => {
 
     expect(result.valid).toBe(false)
     expect(result.errors).toContain('Rootfs source size must be a positive byte integer when provided.')
+  })
+
+  it('rejects invalid required port-forward declarations', () => {
+    const result = validateRootfsManifest({
+      version: 'relay-v0.1.0',
+      requiredPortForwards: [
+        { port: 0, tcp: false, udp: false, purpose: ' ' },
+        { port: 9091, tcp: false, udp: false }
+      ],
+      rootfsItemHash: 'f'.repeat(64),
+      rootfsSizeMiB: 20480,
+      createdAt: '2026-04-15'
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.errors).toContain('Rootfs required port forward #1 must use a TCP/UDP port between 1 and 65535.')
+    expect(result.errors).toContain('Rootfs required port forward #1 must enable TCP or UDP.')
+    expect(result.errors).toContain('Rootfs required port forward #1 purpose must be non-empty when provided.')
+    expect(result.errors).toContain('Rootfs required port forward #2 must enable TCP or UDP.')
   })
 
   it('verifies a store message returned in the Aleph messages array shape', async () => {

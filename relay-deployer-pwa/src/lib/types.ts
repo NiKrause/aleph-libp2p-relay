@@ -1,7 +1,7 @@
 export type PaymentMode = 'hold' | 'credit'
 export type PaymentChain = 'BASE' | 'AVAX' | 'ETH'
 export type AlephSenderChain = 'ETH'
-export type AlephMessageType = 'INSTANCE' | 'FORGET'
+export type AlephMessageType = 'INSTANCE' | 'FORGET' | 'AGGREGATE'
 export type MessageStatus = 'processed' | 'pending' | 'rejected' | 'unknown'
 export type ReferenceStatus = MessageStatus | 'missing'
 export type GatewayProbeStatus = 'reachable' | 'timeout' | 'error' | 'unavailable' | 'unknown'
@@ -9,12 +9,20 @@ export type RootfsInstallStrategy = 'thin' | 'prebaked'
 export type RootfsSourceMode = 'base' | 'custom'
 export type AlephBaseRootfs = 'ubuntu22' | 'debian12'
 
+export interface RootfsRequiredPortForward {
+  port: number
+  tcp?: boolean
+  udp?: boolean
+  purpose?: string
+}
+
 export interface RootfsManifest {
   profile?: string
   version: string
   rootfsInstallStrategy?: RootfsInstallStrategy
   requiresBootstrapNetwork?: boolean
   bootstrapSummary?: string
+  requiredPortForwards?: RootfsRequiredPortForward[]
   rootfsItemHash: string
   rootfsSizeMiB: number
   rootfsSourceSizeBytes?: number
@@ -189,6 +197,13 @@ export interface AlephInstanceContent {
   }
 }
 
+export interface AlephAggregateContent<T = Record<string, unknown>> {
+  address: string
+  key: string
+  content: T
+  time: number
+}
+
 export interface AlephForgetContent {
   address: string
   time: number
@@ -255,6 +270,17 @@ export interface InstanceAllocation {
   vmIpv6?: string | null
   period?: InstanceAllocationPeriod | null
 }
+
+export interface PortForwardFlags {
+  tcp: boolean
+  udp: boolean
+}
+
+export interface PortForwardAggregateEntry {
+  ports: Record<string, PortForwardFlags>
+}
+
+export type PortForwardAggregate = Record<string, PortForwardAggregateEntry>
 
 export interface InstancePortMapping {
   host?: number
