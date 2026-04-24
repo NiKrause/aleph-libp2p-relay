@@ -73,6 +73,11 @@ type CrnExecutionLookupResult = {
   blocked: boolean
 }
 
+function isUnconfirmedNetworkError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return error instanceof TypeError || message.includes('Failed to fetch') || message.includes('Request timed out')
+}
+
 function asString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null
 }
@@ -238,11 +243,55 @@ export async function notifyCrnAllocation(
 
     return { status: 'confirmed' }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (error instanceof TypeError || message.includes('Failed to fetch')) {
+    if (isUnconfirmedNetworkError(error)) {
       // The browser can still send the POST before CORS blocks JS from reading
       // the response, so surface this as an unconfirmed request instead of a
       // hard failure.
+      return { status: 'unconfirmed' }
+    }
+
+    throw error
+  }
+}
+
+export async function configureOrbitdbRelaySetup(args: {
+  hostIpv4: string
+  setupPort: number
+  tcpPort: number
+  wsPort: number
+  webrtcPort?: number | null
+  quicPort?: number | null
+}): Promise<{ status: 'configured' | 'unconfirmed' }> {
+  const targetUrl = `http://${args.hostIpv4}:${args.setupPort}/configure`
+
+  try {
+    const response = await fetchWithTimeout(
+      targetUrl,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'text/plain;charset=UTF-8'
+        },
+        body: JSON.stringify({
+          public_ipv4: args.hostIpv4,
+          tcp_port: args.tcpPort,
+          ws_port: args.wsPort,
+          webrtc_port: args.webrtcPort ?? undefined,
+          quic_port: args.quicPort ?? undefined
+        }),
+        mode: 'cors'
+      },
+      30000
+    )
+
+    if (!response.ok) {
+      const responseText = await response.text().catch(() => '')
+      throw new Error(`Relay setup request failed: ${response.status}${responseText ? ` ${responseText}` : ''}`)
+    }
+
+    return { status: 'configured' }
+  } catch (error) {
+    if (isUnconfirmedNetworkError(error)) {
       return { status: 'unconfirmed' }
     }
 
@@ -378,7 +427,20 @@ export async function fetchInstanceRuntimeDetails(
   const executionMapCache = new Map<string, Promise<CrnExecutionLookupResult>>()
 
   async function inspectInstance(instance: InstanceMessage): Promise<InstanceRuntimeDetails> {
-    const messageStatus = normalizeMessageStatus(instance.status ?? (instance.confirmed ? 'processed' : undefined))
+    let messageStatus = normalizeMessageStatus(instance.status ?? (instance.confirmed ? 'processed' : undefined))
+    if (messageStatus === 'unknown') {
+      try {
+        const payload = await fetchMessageEnvelope(instance.item_hash)
+        const resolvedStatus = normalizeMessageStatus(payload?.status)
+        if (resolvedStatus !== 'unknown') {
+          messageStatus = resolvedStatus
+        }
+      } catch {
+        // Keep the lightweight list lookup resilient; runtime details can still
+        // fall back to "unknown" if the per-message status lookup fails.
+      }
+    }
+
     if (messageStatus !== 'processed') {
       return {
         messageStatus,

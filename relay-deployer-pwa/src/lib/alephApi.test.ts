@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   broadcastInstanceMessage,
+  configureOrbitdbRelaySetup,
   fetchBalance,
   fetchInstanceRuntimeDetails,
   fetchInstances,
@@ -65,6 +66,86 @@ describe('Aleph API client', () => {
         confirmed: true
       })
     ])
+  })
+
+  it('resolves unknown instance status from the per-message API before loading runtime details', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            status: 'processed'
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            node: {
+              url: 'https://selected-crn.example'
+            }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ['a'.repeat(64)]: {
+              networking: {
+                host_ipv4: '149.86.227.106',
+                ipv4_ip: '172.16.7.2',
+                mapped_ports: {
+                  '22': {
+                    host: 24008,
+                    tcp: true,
+                    udp: false
+                  }
+                }
+              },
+              status: {
+                started_at: '2026-04-24T15:56:47Z'
+              },
+              running: true
+            }
+          }),
+          { status: 200 }
+        )
+      )
+
+    const details = await fetchInstanceRuntimeDetails(
+      [
+        {
+          item_hash: 'a'.repeat(64),
+          sender: '0xabc',
+          chain: 'ETH',
+          type: 'INSTANCE',
+          status: undefined,
+          confirmed: false,
+          content: {
+            payment: { type: 'hold' }
+          }
+        }
+      ],
+      []
+    )
+
+    expect(details['a'.repeat(64)]).toMatchObject({
+      messageStatus: 'processed',
+      allocation: {
+        crnUrl: 'https://selected-crn.example'
+      },
+      execution: {
+        networking: {
+          host_ipv4: '149.86.227.106',
+          mapped_ports: {
+            '22': {
+              host: 24008
+            }
+          }
+        }
+      }
+    })
   })
 
   it('explains a rejected deployment with a pending rootfs reference', async () => {
@@ -453,6 +534,19 @@ describe('Aleph API client', () => {
     })
   })
 
+  it('treats timed out allocation notify requests as unconfirmed rather than failed', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new DOMException('The operation was aborted.', 'AbortError')), 0)
+        })
+    )
+
+    await expect(notifyCrnAllocation('https://selected-crn.example/', 'a'.repeat(64))).resolves.toEqual({
+      status: 'unconfirmed'
+    })
+  })
+
   it('sends allocation notify requests to the CRN control endpoint', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('{}', { status: 200 }))
 
@@ -464,5 +558,55 @@ describe('Aleph API client', () => {
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       method: 'POST'
     })
+  })
+
+  it('posts mapped ports to the temporary orbitdb relay setup endpoint', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: 'configured' }), { status: 200 })
+    )
+
+    await expect(
+      configureOrbitdbRelaySetup({
+        hostIpv4: '62.141.40.252',
+        setupPort: 28080,
+        tcpPort: 28191,
+        wsPort: 28192,
+        webrtcPort: 28193,
+        quicPort: 28194
+      })
+    ).resolves.toEqual({ status: 'configured' })
+
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(
+      /^http:\/\/62\.141\.40\.252:28080\/configure\?_ts=\d+$/
+    )
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      method: 'POST',
+      mode: 'cors'
+    })
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      public_ipv4: '62.141.40.252',
+      tcp_port: 28191,
+      ws_port: 28192,
+      webrtc_port: 28193,
+      quic_port: 28194
+    })
+  })
+
+  it('treats timed out relay setup requests as unconfirmed so the UI can retry', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new DOMException('The operation was aborted.', 'AbortError')), 0)
+        })
+    )
+
+    await expect(
+      configureOrbitdbRelaySetup({
+        hostIpv4: '62.141.40.252',
+        setupPort: 28080,
+        tcpPort: 28191,
+        wsPort: 28192
+      })
+    ).resolves.toEqual({ status: 'unconfirmed' })
   })
 })

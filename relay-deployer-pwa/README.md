@@ -60,23 +60,120 @@ cp dist-rootfs/rootfs-manifest.json public/rootfs-manifest.json
 
 That profile now builds a prebaked image by default. Node.js, production
 dependencies, and the `orbitdb-relay-pinner` wrapper are installed into the
-qcow2 during the build. The systemd service is enabled, but held behind a ready
-file until you provide the externally assigned Aleph host ports.
+qcow2 during the build. The relay service is enabled, but held behind a ready
+file until the mapped Aleph host ports are known.
 
-After deploying the VM and once Aleph shows the mapped host ports, SSH in and
-run:
+On first boot the image starts a temporary HTTP setup endpoint on internal port
+`80`. The PWA automatically calls that endpoint after Aleph reports the mapped
+host ports for internal `80`, `9091`, `9092`, `9093`, and `9094`. The endpoint
+then runs `/usr/local/sbin/orbitdb-relay-pinner-configure.sh`, writes
+`VITE_APPEND_ANNOUNCE`, creates `/etc/default/orbitdb-relay-pinner.ready`,
+starts `orbitdb-relay-pinner.service`, and shuts itself down.
+
+That means the checked-in manifest for this profile must include `80/tcp` in
+`requiredPortForwards`, and you need to deploy the updated PWA together with a
+freshly built OrbitDB rootfs image/manifest pair.
+
+## OrbitDB Runtime Flow
+
+For `orbitdb-relay-pinner`, the PWA now automates four separate steps:
+
+1. Create the Aleph `INSTANCE` message.
+2. Publish the Aleph `port-forwarding` aggregate for the required ports from
+   `public/rootfs-manifest.json`.
+3. Wait until the selected CRN exposes runtime networking details including
+   `host_ipv4` and `mapped_ports`.
+4. POST the mapped external host ports to the VM setup endpoint at
+   `http://HOST_IP:HOST_PORT/configure`.
+
+The setup endpoint then:
+
+- writes `VITE_APPEND_ANNOUNCE`
+- creates `/etc/default/orbitdb-relay-pinner.ready`
+- starts `orbitdb-relay-pinner.service`
+- shuts the temporary setup server down
+
+Important distinction:
+
+- `Runtime: Running` in the PWA means the VM execution is running on the CRN
+- it does not guarantee that the relay process inside the VM has already been
+  configured and started
+
+For a fresh OrbitDB instance, the relay process is only considered started once
+`/etc/default/orbitdb-relay-pinner.ready` exists and `orbitdb-relay-pinner`
+listens on ports `9090`, `9091`, `9092`, `9093`, `9094`, and optionally `9443`.
+
+## Port Mapping Notes
+
+Aleph instance creation only auto-requests `22/TCP` for SSH. The additional
+ports declared in the manifest are added afterward through the separate Aleph
+`port-forwarding` aggregate.
+
+For the OrbitDB profile that means the PWA requests:
+
+- `80/TCP` temporary setup endpoint
+- `9090/TCP` metrics and health API
+- `9091/TCP` libp2p TCP
+- `9092/TCP` libp2p WebSocket
+- `9093/UDP` WebRTC-direct
+- `9094/UDP` QUIC
+- `9443/TCP` metrics HTTPS
+
+The Aleph console can show a mapped host port before it is fully reachable from
+your browser or network path. In practice this means the setup server can be
+listening on internal port `80` while the external host port still refuses
+connections for a short time.
+
+## Logging
+
+The relay does not write to a dedicated logfile by default. Logs are captured
+by `journald` through systemd. Use:
 
 ```bash
-/usr/local/sbin/orbitdb-relay-pinner-configure.sh \
-  --public-ipv4 PUBLIC_IP \
-  --tcp-port HOST_TCP_PORT \
-  --ws-port HOST_WS_PORT \
-  --webrtc-port HOST_WEBRTC_PORT \
-  --quic-port HOST_QUIC_PORT
+journalctl -u orbitdb-relay-pinner -n 200 --no-pager
 ```
 
-That writes `VITE_APPEND_ANNOUNCE`, creates
-`/etc/default/orbitdb-relay-pinner.ready`, and starts the relay service.
+or live tail:
+
+```bash
+journalctl -u orbitdb-relay-pinner -f
+```
+
+## Troubleshooting
+
+If the PWA shows mapped ports but the relay is still not configured:
+
+1. Check whether the VM setup server is running:
+
+```bash
+systemctl status orbitdb-relay-pinner-bootstrap --no-pager -l
+ss -ltnp | grep ':80 '
+```
+
+2. Test the setup server locally inside the VM:
+
+```bash
+curl -v http://127.0.0.1/health
+curl -v -X POST http://127.0.0.1/configure \
+  -H 'content-type: application/json' \
+  --data '{"public_ipv4":"PUBLIC_IP","tcp_port":TCP_PORT,"ws_port":WS_PORT,"webrtc_port":WEBRTC_PORT,"quic_port":QUIC_PORT}'
+```
+
+3. Verify that the ready file exists and the relay is actually listening:
+
+```bash
+ls -l /etc/default/orbitdb-relay-pinner.ready
+systemctl status orbitdb-relay-pinner orbitdb-relay-pinner-bootstrap --no-pager -l
+ss -ltnup | grep -E ':(9090|9091|9092|9093|9094|9443)\b' || true
+```
+
+Known caveat:
+
+- a browser-only direct POST to the temporary external setup port can fail if
+  your VPN, split-tunneling rules, or CRN-side reachability prevent access to
+  the mapped host port even though the VM itself is healthy
+- in that case, local `127.0.0.1` setup inside the VM still works and proves
+  the image/configure flow is correct
 
 For the default `py-libp2p` profile you can still force the older fully baked
 image path:

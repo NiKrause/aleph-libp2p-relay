@@ -137,6 +137,7 @@ required_port_forwards_json() {
       cat <<'EOF'
   "requiredPortForwards": [
     { "port": 22, "tcp": true, "udp": false, "purpose": "SSH" },
+    { "port": 80, "tcp": true, "udp": false, "purpose": "Temporary setup endpoint" },
     { "port": 9090, "tcp": true, "udp": false, "purpose": "Metrics and health API" },
     { "port": 9091, "tcp": true, "udp": false, "purpose": "libp2p TCP" },
     { "port": 9092, "tcp": true, "udp": false, "purpose": "libp2p WebSocket" },

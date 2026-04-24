@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import {
+    configureOrbitdbRelaySetup,
     fetchBalance,
     fetchCrns,
     fetchInstanceRuntimeDetails,
@@ -62,6 +63,10 @@
   let deletingInstanceHash = ''
   let startingInstanceHash = ''
   let instanceActionFeedback: Record<string, { tone: 'info' | 'error'; message: string }> = {}
+  let instanceSetupInFlight: Record<string, boolean> = {}
+  let instanceSetupApplied: Record<string, string> = {}
+  let instanceSetupAttempted: Record<string, string> = {}
+  let instanceSetupPendingReachability: Record<string, string> = {}
   let networkBusy = false
   let walletBusy = false
   let deployBusy = false
@@ -418,6 +423,7 @@
       const details = await fetchInstanceRuntimeDetails(nextInstances, nextCrns)
       if (wallet?.address === address && instanceDetailsRequestKey === requestKey) {
         instanceDetails = details
+        void autoConfigureOrbitdbRelayInstances(address, nextInstances, details)
       }
     } catch (error) {
       if (wallet?.address === address && instanceDetailsRequestKey === requestKey) {
@@ -702,6 +708,191 @@
 
   function mappedPorts(instance: InstanceMessage) {
     return Object.entries(instanceDetails[instance.item_hash]?.execution?.networking?.mapped_ports ?? {})
+  }
+
+  function orbitdbSetupTarget(instance: InstanceMessage) {
+    if (rootfsState.manifest?.profile !== 'orbitdb-relay-pinner') return null
+    if (instance.content?.rootfs?.parent?.ref !== rootfsState.manifest.rootfsItemHash) return null
+
+    const networking = instanceDetails[instance.item_hash]?.execution?.networking
+    const hostIpv4 = networking?.host_ipv4
+    const setupPort = networking?.mapped_ports?.['80']?.host
+    const tcpPort = networking?.mapped_ports?.['9091']?.host
+    const wsPort = networking?.mapped_ports?.['9092']?.host
+
+    if (!hostIpv4 || !setupPort || !tcpPort || !wsPort) return null
+
+    return {
+      hostIpv4,
+      setupPort,
+      tcpPort,
+      wsPort,
+      webrtcPort: networking?.mapped_ports?.['9093']?.host ?? null,
+      quicPort: networking?.mapped_ports?.['9094']?.host ?? null
+    }
+  }
+
+  function orbitdbSetupKey(instance: InstanceMessage) {
+    const target = orbitdbSetupTarget(instance)
+    if (!target) return null
+
+    return [
+      target.hostIpv4,
+      target.setupPort,
+      target.tcpPort,
+      target.wsPort,
+      target.webrtcPort ?? '',
+      target.quicPort ?? ''
+    ].join(':')
+  }
+
+  function canRetryOrbitdbSetup(instance: InstanceMessage) {
+    const setupKey = orbitdbSetupKey(instance)
+    if (!setupKey) return false
+    if (instanceSetupInFlight[instance.item_hash]) return false
+    return instanceSetupApplied[instance.item_hash] !== setupKey
+  }
+
+  function orbitdbSetupReachabilityNote(instance: InstanceMessage) {
+    const setupKey = orbitdbSetupKey(instance)
+    if (!setupKey) return null
+    if (instanceSetupPendingReachability[instance.item_hash] !== setupKey) return null
+
+    const target = orbitdbSetupTarget(instance)
+    if (!target) return null
+
+    return `Aleph has already published the mapped setup port ${target.hostIpv4}:${target.setupPort}, but that external CRN port-forward is not confirming reachability yet. The VM-side setup server can still be listening on internal port 80.`
+  }
+
+  async function configureOrbitdbRelayInstance(
+    instance: InstanceMessage,
+    source: 'auto' | 'manual' = 'manual'
+  ) {
+    const target = orbitdbSetupTarget(instance)
+    const setupKey = orbitdbSetupKey(instance)
+    if (!target || !setupKey) throw new Error('Runtime port mappings are not available yet for this instance.')
+
+    instanceSetupInFlight = {
+      ...instanceSetupInFlight,
+      [instance.item_hash]: true
+    }
+    instanceActionFeedback = {
+      ...instanceActionFeedback,
+      [instance.item_hash]: {
+        tone: 'info',
+        message:
+          source === 'manual'
+            ? 'Retrying orbitdb relay setup with the current mapped Aleph ports...'
+            : 'Configuring orbitdb relay setup endpoint with mapped Aleph ports...'
+      }
+    }
+
+    try {
+      const result = await configureOrbitdbRelaySetup(target)
+
+      instanceSetupAttempted = {
+        ...instanceSetupAttempted,
+        [instance.item_hash]: setupKey
+      }
+
+      if (result.status === 'configured') {
+        instanceSetupPendingReachability = {
+          ...instanceSetupPendingReachability,
+          [instance.item_hash]: ''
+        }
+        instanceSetupApplied = {
+          ...instanceSetupApplied,
+          [instance.item_hash]: setupKey
+        }
+        instanceActionFeedback = {
+          ...instanceActionFeedback,
+          [instance.item_hash]: {
+            tone: 'info',
+            message: 'Relay setup endpoint accepted the mapped ports and started orbitdb-relay-pinner.'
+          }
+        }
+      } else {
+        instanceSetupPendingReachability = {
+          ...instanceSetupPendingReachability,
+          [instance.item_hash]: setupKey
+        }
+        instanceActionFeedback = {
+          ...instanceActionFeedback,
+          [instance.item_hash]: {
+            tone: 'info',
+            message:
+              `Relay setup request was sent to ${target.hostIpv4}:${target.setupPort}, but the browser could not confirm the response. Aleph already published that mapped host port, while the CRN may still be activating reachability for it. Refresh or retry setup in a minute to verify whether the VM accepted the mapped ports.`
+          }
+        }
+      }
+
+      window.setTimeout(() => {
+        instanceDetailsRefreshNonce += 1
+      }, 4000)
+    } catch (error) {
+      instanceSetupPendingReachability = {
+        ...instanceSetupPendingReachability,
+        [instance.item_hash]: ''
+      }
+      instanceSetupAttempted = {
+        ...instanceSetupAttempted,
+        [instance.item_hash]: setupKey
+      }
+      instanceActionFeedback = {
+        ...instanceActionFeedback,
+        [instance.item_hash]: {
+          tone: 'error',
+          message: error instanceof Error ? error.message : String(error)
+        }
+      }
+    } finally {
+      instanceSetupInFlight = {
+        ...instanceSetupInFlight,
+        [instance.item_hash]: false
+      }
+    }
+  }
+
+  async function autoConfigureOrbitdbRelayInstances(
+    address: string,
+    nextInstances: InstanceMessage[],
+    details: Record<string, InstanceRuntimeDetails>
+  ) {
+    for (const instance of nextInstances) {
+      if (instance.sender !== address) continue
+      const status = (details[instance.item_hash]?.messageStatus ?? instance.status ?? '').toLowerCase()
+      if (status !== 'processed') continue
+
+      const setupKey = orbitdbSetupKey(instance)
+      if (!setupKey) continue
+      if (instanceSetupApplied[instance.item_hash] === setupKey) continue
+      if (instanceSetupAttempted[instance.item_hash] === setupKey) continue
+      if (instanceSetupInFlight[instance.item_hash]) continue
+
+      try {
+        await configureOrbitdbRelayInstance(instance, 'auto')
+      } catch (error) {
+        instanceActionFeedback = {
+          ...instanceActionFeedback,
+          [instance.item_hash]: {
+            tone: 'error',
+            message: error instanceof Error ? error.message : String(error)
+          }
+        }
+      }
+    }
+  }
+
+  async function retryOrbitdbRelaySetup(instance: InstanceMessage) {
+    const setupKey = orbitdbSetupKey(instance)
+    if (!setupKey) throw new Error('Runtime port mappings are not available yet for this instance.')
+
+    instanceSetupAttempted = {
+      ...instanceSetupAttempted,
+      [instance.item_hash]: ''
+    }
+
+    await configureOrbitdbRelayInstance(instance, 'manual')
   }
 
   function runtimeDetailsNote(instance: InstanceMessage) {
@@ -1342,6 +1533,17 @@
               {#if crnExecutionsUrl}
                 <a href={crnExecutionsUrl} target="_blank" rel="noreferrer">CRN</a>
               {/if}
+              {#if canRetryOrbitdbSetup(instance)}
+                <button
+                  class="instance-retry-button"
+                  type="button"
+                  on:click={() => retryOrbitdbRelaySetup(instance)}
+                  disabled={!canRetryOrbitdbSetup(instance)}
+                  title="Retry the relay setup POST with the current mapped ports"
+                >
+                  {instanceSetupInFlight[instance.item_hash] ? 'Retrying...' : 'Retry setup'}
+                </button>
+              {/if}
               {#if canStartInstance(instance)}
                 <button
                   class="instance-start-button"
@@ -1441,6 +1643,12 @@
               <div class="instance-detail-wide">
                 <span>Runtime</span>
                 <strong>{runtimeDetailsNote(instance)}</strong>
+              </div>
+            {/if}
+            {#if orbitdbSetupReachabilityNote(instance)}
+              <div class="instance-detail-wide">
+                <span>Setup</span>
+                <strong>{orbitdbSetupReachabilityNote(instance)}</strong>
               </div>
             {/if}
             <div class="instance-detail-wide">

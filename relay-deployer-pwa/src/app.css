@@ -699,6 +699,24 @@ textarea:focus {
   cursor: not-allowed;
 }
 
+.instance-retry-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #7c3aed;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.instance-retry-button:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.instance-retry-button:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
 .instance-tags {
   display: flex;
   flex-wrap: wrap;

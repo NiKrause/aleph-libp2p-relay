@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+import ipaddress
+import json
+import os
+import subprocess
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+ENV_FILE = os.environ.get("ENV_FILE", "/etc/default/orbitdb-relay-pinner")
+READY_FILE = os.environ.get("READY_FILE", "/etc/default/orbitdb-relay-pinner.ready")
+SERVICE_NAME = os.environ.get("SERVICE_NAME", "orbitdb-relay-pinner.service")
+CONFIGURE_SCRIPT = "/usr/local/sbin/orbitdb-relay-pinner-configure.sh"
+
+
+def _cors_headers(handler: BaseHTTPRequestHandler) -> None:
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    handler.send_header("Access-Control-Allow-Headers", "content-type")
+
+
+def _validate_port(value: object, field_name: str) -> str:
+    if not isinstance(value, int) or value < 1 or value > 65535:
+        raise ValueError(f"{field_name} must be an integer TCP/UDP port between 1 and 65535")
+    return str(value)
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "OrbitdbRelaySetup/1.0"
+
+    def _send_json(self, status: int, payload: dict) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        _cors_headers(self)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args) -> None:  # noqa: A003
+        return
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        self.send_response(204)
+        _cors_headers(self)
+        self.end_headers()
+
+    def do_GET(self) -> None:  # noqa: N802
+        if self.path not in ("/", "/health"):
+            self._send_json(404, {"status": "not-found"})
+            return
+
+        self._send_json(
+            200,
+            {
+                "status": "waiting-for-port-mapping",
+                "ready": os.path.exists(READY_FILE),
+                "env_file": ENV_FILE,
+            },
+        )
+
+    def do_POST(self) -> None:  # noqa: N802
+        if self.path != "/configure":
+            self._send_json(404, {"status": "not-found"})
+            return
+
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self._send_json(400, {"status": "bad-request", "error": "Invalid Content-Length"})
+            return
+
+        try:
+            payload = json.loads(self.rfile.read(content_length).decode("utf-8") or "{}")
+        except json.JSONDecodeError as error:
+            self._send_json(400, {"status": "bad-request", "error": f"Invalid JSON body: {error}"})
+            return
+
+        try:
+            public_ipv4 = str(ipaddress.ip_address(payload.get("public_ipv4")))
+            tcp_port = _validate_port(payload.get("tcp_port"), "tcp_port")
+            ws_port = _validate_port(payload.get("ws_port"), "ws_port")
+            webrtc_port = payload.get("webrtc_port")
+            quic_port = payload.get("quic_port")
+            args = [
+                CONFIGURE_SCRIPT,
+                "--public-ipv4",
+                public_ipv4,
+                "--tcp-port",
+                tcp_port,
+                "--ws-port",
+                ws_port,
+            ]
+            if webrtc_port is not None:
+                args.extend(["--webrtc-port", _validate_port(webrtc_port, "webrtc_port")])
+            if quic_port is not None:
+                args.extend(["--quic-port", _validate_port(quic_port, "quic_port")])
+        except ValueError as error:
+            self._send_json(400, {"status": "bad-request", "error": str(error)})
+            return
+
+        try:
+            result = subprocess.run(
+                args,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as error:
+            self._send_json(
+                500,
+                {
+                    "status": "error",
+                    "error": error.stderr.strip() or error.stdout.strip() or str(error),
+                },
+            )
+            return
+
+        self._send_json(
+            200,
+            {
+                "status": "configured",
+                "stdout": result.stdout.strip(),
+            },
+        )
+        threading.Thread(target=self.server.shutdown, daemon=True).start()  # type: ignore[arg-type]
+
+
+def main() -> None:
+    server = ThreadingHTTPServer(("0.0.0.0", 80), Handler)
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

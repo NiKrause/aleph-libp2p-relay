@@ -1,19 +1,18 @@
 [Unit]
-Description=Prepare orbitdb-relay-pinner runtime on first boot
+Description=Temporary orbitdb-relay-pinner setup endpoint
 Wants=network-online.target
 After=network-online.target
+ConditionPathExists=!/etc/default/orbitdb-relay-pinner.ready
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
-Environment=INSTALL_DIR=/opt/orbitdb-relay-pinner
-Environment=SERVICE_NAME=orbitdb-relay-pinner
-Environment=SERVICE_USER=orbitdb-relay
-Environment=DATA_DIR=/var/lib/orbitdb-relay-pinner
 Environment=ENV_FILE=/etc/default/orbitdb-relay-pinner
-Environment=BOOTSTRAP_STAMP=/var/lib/orbitdb-relay-pinner/bootstrap-complete
-ExecStart=/usr/local/sbin/orbitdb-relay-pinner-bootstrap.sh
+Environment=READY_FILE=/etc/default/orbitdb-relay-pinner.ready
+Environment=SERVICE_NAME=orbitdb-relay-pinner.service
+ExecStart=/usr/bin/python3 /usr/local/sbin/orbitdb-relay-pinner-setup-server.py
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=30min
+Restart=on-failure
+RestartSec=2s
 
+[Install]
+WantedBy=multi-user.target

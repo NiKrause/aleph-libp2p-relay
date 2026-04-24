@@ -133,12 +133,14 @@ pnpm build
 
 - Metrics/health port: `9090`
 - Metrics HTTPS port: `9443`
+- Temporary setup endpoint: `80`
 - Relay TCP/WS/WebRTC/QUIC ports: `9091`, `9092`, `9093`, `9094`
 - Service name: `orbitdb-relay-pinner`
 - Install directory: `/opt/orbitdb-relay-pinner`
 - Environment file: `/etc/default/orbitdb-relay-pinner`
 - Data directory: `/var/lib/orbitdb-relay-pinner`
 - Configure helper: `/usr/local/sbin/orbitdb-relay-pinner-configure.sh`
+- Setup endpoint service: `orbitdb-relay-pinner-bootstrap.service`
 - Ready file: `/etc/default/orbitdb-relay-pinner.ready`
 
 The OrbitDB profile copies the upstream `deploy/orbitdb-relay-pinner.service`
@@ -148,8 +150,10 @@ and leaves the service enabled but gated by `/etc/default/orbitdb-relay-pinner.r
 It does not try to guess the final public IP or host-mapped Aleph ports inside
 the rootfs build.
 
-After deployment, once Aleph has assigned the external host ports, connect over
-SSH and run:
+Instead, the image boots a temporary HTTP setup endpoint on internal port `80`
+via `orbitdb-relay-pinner-bootstrap.service`. Once Aleph has assigned the
+external host port mappings, the PWA posts them to `http://HOST_IP:HOST_PORT/configure`.
+That endpoint runs:
 
 ```bash
 /usr/local/sbin/orbitdb-relay-pinner-configure.sh \
@@ -160,8 +164,53 @@ SSH and run:
   --quic-port HOST_QUIC_PORT
 ```
 
-That writes `VITE_APPEND_ANNOUNCE`, creates the ready file, and starts the
-relay with the prebaked runtime.
+After a successful configure call it writes `VITE_APPEND_ANNOUNCE`, creates the
+ready file, starts the relay with the prebaked runtime, and shuts the temporary
+HTTP endpoint down.
+
+### Operational Notes
+
+- `orbitdb-relay-pinner.service` is gated by
+  `/etc/default/orbitdb-relay-pinner.ready`
+- `orbitdb-relay-pinner-bootstrap.service` is only the temporary setup server
+- if the bootstrap service is active and the relay service is skipped because of
+  `ConditionPathExists=/etc/default/orbitdb-relay-pinner.ready`, the relay has
+  not been configured yet
+
+Expected listening ports after a successful configure step:
+
+- `9090/TCP` metrics and health API
+- `9091/TCP` relay TCP
+- `9092/TCP` relay WebSocket
+- `9093/UDP` WebRTC-direct
+- `9094/UDP` QUIC
+- `9443/TCP` metrics HTTPS
+
+To verify the live VM after configure:
+
+```bash
+systemctl status orbitdb-relay-pinner orbitdb-relay-pinner-bootstrap --no-pager -l
+ss -ltnup | grep -E ':(9090|9091|9092|9093|9094|9443)\b' || true
+```
+
+Logs go to `journald`, not to a dedicated file:
+
+```bash
+journalctl -u orbitdb-relay-pinner -n 200 --no-pager
+```
+
+If the external mapped setup port is flaky or inaccessible, you can always test
+the setup server locally from inside the VM:
+
+```bash
+curl -v http://127.0.0.1/health
+curl -v -X POST http://127.0.0.1/configure \
+  -H 'content-type: application/json' \
+  --data '{"public_ipv4":"PUBLIC_IP","tcp_port":TCP_PORT,"ws_port":WS_PORT,"webrtc_port":WEBRTC_PORT,"quic_port":QUIC_PORT}'
+```
+
+That local success proves the image build and configure helper are working even
+if browser-to-CRN reachability for the temporary external setup port is not.
 
 ## First-Boot Requirements
 

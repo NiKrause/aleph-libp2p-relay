@@ -48,7 +48,7 @@ if [ -f "${INSTALL_DIR}/pnpm-lock.yaml" ] && command -v corepack >/dev/null 2>&1
       "${INSTALL_DIR}/package.json" 2>/dev/null || true
   )"
   if [ -n "${package_manager}" ]; then
-    install_command="cd '${INSTALL_DIR}' && corepack enable && corepack prepare '${package_manager}' --activate && pnpm install --prod --frozen-lockfile"
+    install_command="cd '${INSTALL_DIR}' && export COREPACK_HOME='${DATA_DIR}/.cache/corepack' && mkdir -p \"\$COREPACK_HOME\" && corepack prepare '${package_manager}' --activate && corepack pnpm install --prod --frozen-lockfile"
   fi
 fi
 
@@ -100,4 +100,3 @@ write_env_var "RELAY_WEBRTC_PORT" "9093"
 write_env_var "RELAY_QUIC_PORT" "9094"
 write_env_var "ENABLE_GENERAL_LOGS" "1"
 write_env_var "DEBUG" "'libp2p:auto-tls,libp2p:auto-tls:*,libp2p:websockets:listener'"
-
