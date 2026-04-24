@@ -681,6 +681,24 @@ textarea:focus {
   cursor: not-allowed;
 }
 
+.instance-start-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #0369a1;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.instance-start-button:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.instance-start-button:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
 .instance-tags {
   display: flex;
   flex-wrap: wrap;

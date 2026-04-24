@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_DEPLOYMENT_FORM, estimateRootfsStorageHolding, validateDeployment } from './deployment'
+import {
+  DEFAULT_DEPLOYMENT_FORM,
+  estimateRootfsStorageHolding,
+  isValidSshPublicKey,
+  normalizeSshPublicKey,
+  validateDeployment
+} from './deployment'
 import type { BalanceResponse, Crn, InstancePricing, RootfsManifest, RootfsResolution } from './types'
 
 const manifest: RootfsManifest = {
@@ -93,6 +99,16 @@ describe('validateDeployment', () => {
     expect(result.ok).toBe(true)
     expect(result.quote?.required).toBe(1000)
     expect(result.quote?.available).toBe(4000)
+  })
+
+  it('normalizes SSH public keys to a single trimmed line', () => {
+    expect(normalizeSshPublicKey('  ssh-ed25519   AAAATEST   user@host \n')).toBe('ssh-ed25519 AAAATEST user@host')
+  })
+
+  it('accepts valid SSH public keys and rejects malformed ones', () => {
+    expect(isValidSshPublicKey('ssh-ed25519 AAAATEST user@host')).toBe(true)
+    expect(isValidSshPublicKey('ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7')).toBe(true)
+    expect(isValidSshPublicKey('not-a-key')).toBe(false)
   })
 
   it('accepts a hold deployment when available ALEPH exactly matches the requirement', () => {

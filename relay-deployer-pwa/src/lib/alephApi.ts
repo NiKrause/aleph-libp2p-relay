@@ -68,6 +68,11 @@ type CrnExecutionV2Payload = {
 
 type CrnExecutionMapPayload = Record<string, CrnExecutionV1Payload | CrnExecutionV2Payload>
 
+type CrnExecutionLookupResult = {
+  payload: CrnExecutionMapPayload | null
+  blocked: boolean
+}
+
 function asString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null
 }
@@ -170,7 +175,10 @@ export async function fetchInstances(address: string, apiHost = ALEPH_API_HOST):
   if (!response.ok) throw new Error(`Instance list request failed: ${response.status}`)
 
   const payload = (await response.json()) as { messages?: InstanceMessage[] }
-  return payload.messages ?? []
+  return (payload.messages ?? []).map((message) => ({
+    ...message,
+    status: typeof message.status === 'string' && message.status.trim() ? message.status : message.confirmed ? 'processed' : message.status
+  }))
 }
 
 async function fetchSchedulerAllocation(itemHash: string): Promise<InstanceAllocation | null> {
@@ -205,6 +213,43 @@ async function fetchSchedulerAllocation(itemHash: string): Promise<InstanceAlloc
   }
 }
 
+export async function notifyCrnAllocation(
+  crnUrl: string,
+  itemHash: string
+): Promise<{ status: 'confirmed' | 'unconfirmed' }> {
+  const normalizedCrnUrl = crnUrl.replace(/\/+$/, '')
+
+  try {
+    const response = await fetchWithTimeout(`${normalizedCrnUrl}/control/allocation/notify`, {
+      method: 'POST',
+      headers: {
+        // text/plain keeps the request "simple" in browsers, which avoids a
+        // preflight even on CRNs that do not implement OPTIONS properly.
+        'content-type': 'text/plain;charset=UTF-8'
+      },
+      body: JSON.stringify({ instance: itemHash }),
+      mode: 'cors'
+    })
+
+    if (!response.ok) {
+      const responseText = await response.text().catch(() => '')
+      throw new Error(`CRN allocation notify failed: ${response.status}${responseText ? ` ${responseText}` : ''}`)
+    }
+
+    return { status: 'confirmed' }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (error instanceof TypeError || message.includes('Failed to fetch')) {
+      // The browser can still send the POST before CORS blocks JS from reading
+      // the response, so surface this as an unconfirmed request instead of a
+      // hard failure.
+      return { status: 'unconfirmed' }
+    }
+
+    throw error
+  }
+}
+
 function manualAllocation(instance: InstanceMessage, crns: Crn[]): InstanceAllocation | null {
   const crnHash = instance.content?.requirements?.node?.node_hash
   if (!crnHash) return null
@@ -224,7 +269,7 @@ function manualAllocation(instance: InstanceMessage, crns: Crn[]): InstanceAlloc
   }
 }
 
-async function fetchCrnExecutionMap(crnUrl: string): Promise<CrnExecutionMapPayload | null> {
+async function fetchCrnExecutionMap(crnUrl: string): Promise<CrnExecutionLookupResult> {
   const normalizedCrnUrl = crnUrl.replace(/\/+$/, '')
 
   // CRN execution lists are only used to enrich the UI. Some CRNs do not expose
@@ -233,25 +278,41 @@ async function fetchCrnExecutionMap(crnUrl: string): Promise<CrnExecutionMapPayl
   try {
     const v2Response = await fetchWithTimeout(`${normalizedCrnUrl}/v2/about/executions/list`, { cache: 'no-cache' })
     if (v2Response.ok) {
-      return (await v2Response.json()) as CrnExecutionMapPayload
+      return {
+        payload: (await v2Response.json()) as CrnExecutionMapPayload,
+        blocked: false
+      }
     }
 
     if (v2Response.status !== 404) {
-      return null
+      return { payload: null, blocked: false }
     }
-  } catch {
-    return null
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (error instanceof TypeError || message.includes('Failed to fetch')) {
+      return { payload: null, blocked: true }
+    }
+
+    return { payload: null, blocked: false }
   }
 
   try {
     const v1Response = await fetchWithTimeout(`${normalizedCrnUrl}/about/executions/list`, { cache: 'no-cache' })
     if (!v1Response.ok) {
-      return null
+      return { payload: null, blocked: false }
     }
 
-    return (await v1Response.json()) as CrnExecutionMapPayload
-  } catch {
-    return null
+    return {
+      payload: (await v1Response.json()) as CrnExecutionMapPayload,
+      blocked: false
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (error instanceof TypeError || message.includes('Failed to fetch')) {
+      return { payload: null, blocked: true }
+    }
+
+    return { payload: null, blocked: false }
   }
 }
 
@@ -314,7 +375,7 @@ export async function fetchInstanceRuntimeDetails(
   instances: InstanceMessage[],
   crns: Crn[]
 ): Promise<Record<string, InstanceRuntimeDetails>> {
-  const executionMapCache = new Map<string, Promise<CrnExecutionMapPayload | null>>()
+  const executionMapCache = new Map<string, Promise<CrnExecutionLookupResult>>()
 
   async function inspectInstance(instance: InstanceMessage): Promise<InstanceRuntimeDetails> {
     const messageStatus = normalizeMessageStatus(instance.status ?? (instance.confirmed ? 'processed' : undefined))
@@ -330,11 +391,12 @@ export async function fetchInstanceRuntimeDetails(
       messageStatus,
       allocation: null,
       execution: null,
+      executionLookupBlocked: false,
       error: null
     }
 
     try {
-      details.allocation = manualAllocation(instance, crns) ?? (await fetchSchedulerAllocation(instance.item_hash))
+      details.allocation = (await fetchSchedulerAllocation(instance.item_hash)) ?? manualAllocation(instance, crns)
     } catch (error) {
       details.error = error instanceof Error ? error.message : String(error)
       return details
@@ -350,10 +412,12 @@ export async function fetchInstanceRuntimeDetails(
         executionMapCache.set(crnUrl, executionPromise)
       }
 
-      const executionMap = await executionPromise
-      const executionPayload = executionMap?.[instance.item_hash]
+      const executionLookup = await executionPromise
+      details.executionLookupBlocked = executionLookup.blocked
+      const executionPayload = executionLookup.payload?.[instance.item_hash]
       if (executionPayload) {
         details.execution = normalizeExecution(executionPayload, crnUrl)
+        details.executionLookupBlocked = false
       }
     } catch (error) {
       details.error = error instanceof Error ? error.message : String(error)

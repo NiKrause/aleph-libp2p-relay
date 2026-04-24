@@ -295,6 +295,7 @@ export interface InstanceRuntimeDetails {
   messageStatus: MessageStatus
   allocation: InstanceAllocation | null
   execution: InstanceExecution | null
+  executionLookupBlocked?: boolean
   error?: string | null
 }
 

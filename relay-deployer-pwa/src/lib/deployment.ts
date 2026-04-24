@@ -24,6 +24,8 @@ import type {
 
 const QUOTE_EPSILON = 1e-9
 const BYTES_PER_MIB = 1024 * 1024
+const SSH_PUBLIC_KEY_PATTERN =
+  /^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\s+[A-Za-z0-9+/]+={0,3}(?:\s+.+)?$/
 
 export const DEFAULT_DEPLOYMENT_FORM: DeploymentForm = {
   name: 'py-libp2p-relay',
@@ -111,6 +113,21 @@ export function estimateRootfsStorageHolding(manifest: RootfsManifest | null, pr
   return (manifest.rootfsSourceSizeBytes / BYTES_PER_MIB) * unitPrice
 }
 
+export function normalizeSshPublicKey(value: string): string {
+  return value
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+export function isValidSshPublicKey(value: string): boolean {
+  const normalized = normalizeSshPublicKey(value)
+  return SSH_PUBLIC_KEY_PATTERN.test(normalized)
+}
+
 export function validateDeployment(args: {
   form: DeploymentForm
   manifest: RootfsManifest | null
@@ -149,7 +166,13 @@ export function validateDeployment(args: {
   }
 
   if (!args.form.name.trim()) errors.push('Instance name is required.')
-  if (!args.form.sshPublicKey.trim()) errors.push('An SSH public key is required.')
+
+  const normalizedSshKey = normalizeSshPublicKey(args.form.sshPublicKey)
+  if (!normalizedSshKey) {
+    errors.push('An SSH public key is required.')
+  } else if (!isValidSshPublicKey(normalizedSshKey)) {
+    errors.push('SSH public key must be a single valid .pub line, including the key type and base64 payload.')
+  }
   if (!pricing) errors.push('Live Aleph pricing is required.')
   if (!args.balance) errors.push('Wallet balance is required.')
   if (!tier) errors.push('Selected tier is unavailable in current pricing.')

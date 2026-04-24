@@ -1,7 +1,7 @@
 import { ALEPH_BASE_ROOTFS_ITEM_HASHES, ALEPH_API_HOST, ALEPH_DEFAULT_CHANNEL } from './config'
 import { broadcastAlephMessage } from './alephApi'
 import { sha256Hex } from './crypto'
-import { createReleaseMetadata, tierSpec } from './deployment'
+import { createReleaseMetadata, normalizeSshPublicKey, tierSpec } from './deployment'
 import { personalSign } from './wallet'
 import type {
   AlephBroadcastMessage,
@@ -25,7 +25,7 @@ export function createInstanceContent(args: {
   now?: number
 }): AlephInstanceContent {
   const spec = tierSpec(args.pricing, args.tier)
-  const sshKey = args.form.sshPublicKey.trim()
+  const sshKey = normalizeSshPublicKey(args.form.sshPublicKey)
 
   const requirements =
     args.form.paymentMode === 'credit' && args.selectedCrn

@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { broadcastInstanceMessage, fetchBalance, fetchInstanceRuntimeDetails, fetchInstances, inspectDeploymentResult } from './alephApi'
+import {
+  broadcastInstanceMessage,
+  fetchBalance,
+  fetchInstanceRuntimeDetails,
+  fetchInstances,
+  inspectDeploymentResult,
+  notifyCrnAllocation
+} from './alephApi'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -39,6 +46,25 @@ describe('Aleph API client', () => {
     expect(url.searchParams.get('msgTypes')).toBe('INSTANCE')
     expect(url.searchParams.get('addresses')).toBe('0xabc')
     expect(url.searchParams.get('message_statuses')).toBe('processed,pending,rejected,removing')
+  })
+
+  it('marks confirmed instances as processed when the list payload omits status', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          messages: [{ item_hash: 'h'.repeat(64), type: 'INSTANCE', confirmed: true, status: null }]
+        }),
+        { status: 200 }
+      )
+    )
+
+    await expect(fetchInstances('0xabc')).resolves.toEqual([
+      expect.objectContaining({
+        item_hash: 'h'.repeat(64),
+        status: 'processed',
+        confirmed: true
+      })
+    ])
   })
 
   it('explains a rejected deployment with a pending rootfs reference', async () => {
@@ -226,6 +252,7 @@ describe('Aleph API client', () => {
         crnUrl: 'https://dv1ca.deepvalley.cloud',
         vmIpv6: '2a02:c207:1:2178::2'
       },
+      executionLookupBlocked: false,
       execution: {
         crnUrl: 'https://dv1ca.deepvalley.cloud',
         version: 'v2',
@@ -240,6 +267,10 @@ describe('Aleph API client', () => {
 
   it('loads manual CRN runtime details for a credit instance without hitting the scheduler', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response('', { status: 404 })
+    )
+
+    fetchMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
           [Array(65).join('b')]: {
@@ -294,8 +325,9 @@ describe('Aleph API client', () => {
       ]
     )
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(String(fetchMock.mock.calls[0][0])).toContain('https://selected-crn.example/v2/about/executions/list')
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(String(fetchMock.mock.calls[0][0])).toContain('https://scheduler.api.aleph.cloud/api/v0/allocation/')
+    expect(String(fetchMock.mock.calls[1][0])).toContain('https://selected-crn.example/v2/about/executions/list')
     expect(details['b'.repeat(64)]).toMatchObject({
       messageStatus: 'processed',
       allocation: {
@@ -314,7 +346,10 @@ describe('Aleph API client', () => {
   })
 
   it('treats browser-blocked CRN execution lookups as optional runtime details', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('', { status: 404 }))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
 
     const details = await fetchInstanceRuntimeDetails(
       [
@@ -343,8 +378,9 @@ describe('Aleph API client', () => {
       ]
     )
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(String(fetchMock.mock.calls[0][0])).toContain('https://selected-crn.example/v2/about/executions/list')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(String(fetchMock.mock.calls[0][0])).toContain('https://scheduler.api.aleph.cloud/api/v0/allocation/')
+    expect(String(fetchMock.mock.calls[1][0])).toContain('https://selected-crn.example/v2/about/executions/list')
     expect(details['d'.repeat(64)]).toMatchObject({
       messageStatus: 'processed',
       allocation: {
@@ -352,8 +388,81 @@ describe('Aleph API client', () => {
         crnHash: 'e'.repeat(64),
         crnUrl: 'https://selected-crn.example'
       },
+      executionLookupBlocked: true,
       execution: null,
       error: null
+    })
+  })
+
+  it('prefers scheduler allocation details over the selected CRN hint when both exist', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            vm_hash: 'f'.repeat(64),
+            vm_ipv6: '2001:db8::42',
+            node: {
+              node_id: 'scheduler-crn',
+              url: 'https://scheduled-crn.example'
+            }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 404 }))
+
+    const details = await fetchInstanceRuntimeDetails(
+      [
+        {
+          item_hash: 'f'.repeat(64),
+          sender: '0xabc',
+          chain: 'ETH',
+          type: 'INSTANCE',
+          status: 'processed',
+          content: {
+            payment: { type: 'credit', chain: 'ETH' },
+            requirements: {
+              node: {
+                node_hash: 'g'.repeat(64)
+              }
+            }
+          }
+        }
+      ],
+      [
+        {
+          hash: 'g'.repeat(64),
+          name: 'Selected CRN',
+          address: 'https://selected-crn.example'
+        }
+      ]
+    )
+
+    expect(details['f'.repeat(64)]?.allocation).toMatchObject({
+      source: 'scheduler',
+      crnUrl: 'https://scheduled-crn.example'
+    })
+  })
+
+  it('treats browser-blocked allocation notify requests as unconfirmed rather than failed', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    await expect(notifyCrnAllocation('https://selected-crn.example/', 'a'.repeat(64))).resolves.toEqual({
+      status: 'unconfirmed'
+    })
+  })
+
+  it('sends allocation notify requests to the CRN control endpoint', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('{}', { status: 200 }))
+
+    await expect(notifyCrnAllocation('https://selected-crn.example/', 'a'.repeat(64))).resolves.toEqual({
+      status: 'confirmed'
+    })
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain('https://selected-crn.example/control/allocation/notify')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      method: 'POST'
     })
   })
 })

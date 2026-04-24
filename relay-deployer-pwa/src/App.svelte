@@ -1,12 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { fetchBalance, fetchCrns, fetchInstanceRuntimeDetails, fetchInstances, waitForDeploymentResult } from './lib/alephApi'
+  import {
+    fetchBalance,
+    fetchCrns,
+    fetchInstanceRuntimeDetails,
+    fetchInstances,
+    notifyCrnAllocation,
+    waitForDeploymentResult
+  } from './lib/alephApi'
   import { deleteInstance } from './lib/alephForget'
   import { deployInstance } from './lib/alephMessage'
   import {
     DEFAULT_DEPLOYMENT_FORM,
     compatibleCrns,
     estimateRootfsStorageHolding,
+    normalizeSshPublicKey,
     selectedTier,
     tierSpec,
     validateDeployment
@@ -51,6 +59,7 @@
   let instanceDetailsRefreshNonce = 0
   let deploymentResult: DeploymentResult | null = null
   let deletingInstanceHash = ''
+  let startingInstanceHash = ''
   let instanceActionFeedback: Record<string, { tone: 'info' | 'error'; message: string }> = {}
   let networkBusy = false
   let walletBusy = false
@@ -445,11 +454,15 @@
       const selectedCrn = form.selectedCrnHash
         ? crns.find((crn) => crn.hash === form.selectedCrnHash) ?? null
         : null
+      const normalizedSshPublicKey = normalizeSshPublicKey(form.sshPublicKey)
+      if (normalizedSshPublicKey !== form.sshPublicKey) {
+        form = { ...form, sshPublicKey: normalizedSshPublicKey }
+      }
 
       statusText = 'Signing Aleph message'
       deploymentResult = await deployInstance({
         sender: wallet.address,
-        form,
+        form: { ...form, sshPublicKey: normalizedSshPublicKey },
         manifest: usingBaseRootfs ? null : rootfsState.manifest,
         pricing,
         tier,
@@ -469,6 +482,27 @@
           rejectionReason: finalResult.rejectionReason,
           references: finalResult.references,
           details: finalResult.details
+        }
+      }
+
+      if (deploymentResult.status === 'processed' && form.paymentMode === 'credit' && selectedCrn?.address) {
+        try {
+          const feedbackMessage = await requestCrnStart(deploymentResult.itemHash, selectedCrn.address)
+          instanceActionFeedback = {
+            ...instanceActionFeedback,
+            [deploymentResult.itemHash]: {
+              tone: 'info',
+              message: feedbackMessage
+            }
+          }
+        } catch (error) {
+          instanceActionFeedback = {
+            ...instanceActionFeedback,
+            [deploymentResult.itemHash]: {
+              tone: 'error',
+              message: error instanceof Error ? error.message : String(error)
+            }
+          }
         }
       }
 
@@ -518,7 +552,9 @@
     const status = execution?.status
 
     if (!execution) {
-      if (details?.allocation?.crnUrl) return 'Not running on CRN yet'
+      if (details?.executionLookupBlocked && details.allocation?.crnUrl) return 'Runtime hidden by CRN CORS'
+      if (details?.allocation?.source === 'scheduler' && details.allocation.crnUrl) return 'Allocated, waiting for runtime'
+      if (details?.allocation?.source === 'manual' && details.allocation.crnUrl) return 'Selected CRN resolved'
       if (details?.messageStatus === 'processed') return 'Awaiting allocation'
       return 'Awaiting runtime details'
     }
@@ -549,7 +585,7 @@
       return { label: 'Allocated by scheduler', tone: 'ok' }
     }
     if (details?.allocation?.source === 'manual' && details.allocation.crnUrl) {
-      return { label: 'Requested CRN only', tone: 'pending' }
+      return { label: 'Selected CRN resolved', tone: 'ok' }
     }
     if (details?.messageStatus === 'processed') return { label: 'Allocation not reported yet', tone: 'pending' }
     return { label: 'Waiting for Aleph processing', tone: 'muted' }
@@ -566,11 +602,14 @@
     if (status?.starting_at) return { label: 'Starting', tone: 'pending' }
     if (status?.prepared_at) return { label: 'Prepared', tone: 'pending' }
     if (status?.preparing_at || status?.defined_at) return { label: 'Preparing', tone: 'pending' }
+    if (details?.executionLookupBlocked && details.allocation?.crnUrl) {
+      return { label: 'Runtime blocked by CRN CORS', tone: 'pending' }
+    }
     if (details?.allocation?.source === 'scheduler' && details.allocation.crnUrl) {
       return { label: 'Allocated, awaiting CRN details', tone: 'pending' }
     }
     if (details?.allocation?.source === 'manual' && details.allocation.crnUrl) {
-      return { label: 'Not visible on selected CRN yet', tone: 'pending' }
+      return { label: 'Awaiting CRN runtime details', tone: 'pending' }
     }
     if (details?.messageStatus === 'processed') return { label: 'Runtime not available yet', tone: 'pending' }
     return { label: 'Runtime not available', tone: 'muted' }
@@ -617,8 +656,13 @@
   function instanceAllocationSourceLabel(instance: InstanceMessage) {
     const source = instanceDetails[instance.item_hash]?.allocation?.source
     if (source === 'scheduler') return 'scheduler'
-    if (source === 'manual') return 'deploy message'
+    if (source === 'manual') return 'deploy message (credit)'
     return null
+  }
+
+  function showSchedulerAllocationLink(instance: InstanceMessage) {
+    const details = instanceDetails[instance.item_hash]
+    return details?.allocation?.source === 'scheduler' || instance.content?.payment?.type === 'hold'
   }
 
   function instanceSshCommand(instance: InstanceMessage) {
@@ -642,11 +686,14 @@
     const crnLabel = instanceCrnLabel(instance)
 
     if (details?.execution) return null
+    if (details?.executionLookupBlocked && details?.allocation?.crnUrl && crnLabel) {
+      return `${crnLabel} exposes runtime details, but the browser cannot read them because that CRN does not send CORS headers. Open the CRN executions link or the Aleph console to inspect connection details.`
+    }
     if (details?.allocation?.source === 'scheduler' && details.allocation.crnUrl && crnLabel) {
       return `${crnLabel} has been selected, but it is not exposing this VM in its execution list yet.`
     }
     if (details?.allocation?.source === 'manual' && details.allocation.crnUrl && crnLabel) {
-      return `${crnLabel} was requested in the deployment, but Aleph has not reported an allocation for this VM yet.`
+      return `${crnLabel} is selected in the deployment. Runtime details will appear here as soon as the browser can read that CRN's execution list.`
     }
     if (details?.messageStatus === 'processed') {
       return 'This deployment is confirmed on Aleph, but runtime allocation details are not available yet.'
@@ -671,6 +718,73 @@
   function canDeleteInstance(instance: InstanceMessage) {
     const status = (instanceDetails[instance.item_hash]?.messageStatus ?? instance.status ?? '').toLowerCase()
     return Boolean(wallet) && !deletingInstanceHash && status !== 'removing'
+  }
+
+  function canStartInstance(instance: InstanceMessage) {
+    const details = instanceDetails[instance.item_hash]
+
+    return Boolean(
+      wallet &&
+        !startingInstanceHash &&
+        instance.content?.payment?.type === 'credit' &&
+        details?.messageStatus === 'processed' &&
+        details.allocation?.source === 'manual' &&
+        details.allocation.crnUrl &&
+        !details.execution
+    )
+  }
+
+  async function requestCrnStart(itemHash: string, crnUrl: string): Promise<string> {
+    const result = await notifyCrnAllocation(crnUrl, itemHash)
+
+    if (result.status === 'confirmed') {
+      return 'CRN accepted the start request. Runtime details may take a moment to appear.'
+    }
+
+    return 'Start request was sent, but the browser could not confirm the CRN response because of cross-origin restrictions. Refresh to see whether the VM appears.'
+  }
+
+  async function startDeployment(instance: InstanceMessage) {
+    if (!wallet) throw new Error('Connect MetaMask before starting instances.')
+
+    const details = instanceDetails[instance.item_hash]
+    const crnUrl = details?.allocation?.crnUrl
+    if (!crnUrl) throw new Error('No CRN URL is available for this instance.')
+
+    startingInstanceHash = instance.item_hash
+    instanceActionFeedback = {
+      ...instanceActionFeedback,
+      [instance.item_hash]: {
+        tone: 'info',
+        message: 'Requesting the selected CRN to start this instance...'
+      }
+    }
+
+    try {
+      const feedbackMessage = await requestCrnStart(instance.item_hash, crnUrl)
+      statusText = 'CRN start requested'
+      instanceActionFeedback = {
+        ...instanceActionFeedback,
+        [instance.item_hash]: {
+          tone: 'info',
+          message: feedbackMessage
+        }
+      }
+
+      instances = await fetchInstances(wallet.address)
+      instanceDetailsRefreshNonce += 1
+    } catch (error) {
+      statusText = 'Needs attention'
+      instanceActionFeedback = {
+        ...instanceActionFeedback,
+        [instance.item_hash]: {
+          tone: 'error',
+          message: error instanceof Error ? error.message : String(error)
+        }
+      }
+    } finally {
+      startingInstanceHash = ''
+    }
   }
 
   async function deleteDeployment(instance: InstanceMessage) {
@@ -953,7 +1067,13 @@
 
         <label class="wide">
           <span>SSH public key</span>
-          <textarea bind:value={form.sshPublicKey} rows="4" spellcheck="false" placeholder="ssh-ed25519 ..."></textarea>
+          <textarea
+            bind:value={form.sshPublicKey}
+            rows="4"
+            spellcheck="false"
+            placeholder="ssh-ed25519 AAAA... user@host"
+            on:blur={() => (form = { ...form, sshPublicKey: normalizeSshPublicKey(form.sshPublicKey) })}
+          ></textarea>
           <small>Saved in this browser for next time.</small>
         </label>
       </div>
@@ -1199,6 +1319,17 @@
               {#if crnExecutionsUrl}
                 <a href={crnExecutionsUrl} target="_blank" rel="noreferrer">CRN</a>
               {/if}
+              {#if canStartInstance(instance)}
+                <button
+                  class="instance-start-button"
+                  type="button"
+                  on:click={() => startDeployment(instance)}
+                  disabled={!canStartInstance(instance)}
+                  title="Request the selected CRN to start this instance"
+                >
+                  {startingInstanceHash === instance.item_hash ? 'Starting...' : 'Start'}
+                </button>
+              {/if}
               <button
                 class="instance-delete-button"
                 type="button"
@@ -1292,17 +1423,19 @@
             <div class="instance-detail-wide">
               <span>Inspect</span>
               <div class="instance-detail-links">
-                <a href={explorerUrl(instance.sender, instance.item_hash)} target="_blank" rel="noreferrer">Explorer</a>
-                <a href={apiMessageUrl(instance.item_hash)} target="_blank" rel="noreferrer">Aleph API</a>
+              <a href={explorerUrl(instance.sender, instance.item_hash)} target="_blank" rel="noreferrer">Explorer</a>
+              <a href={apiMessageUrl(instance.item_hash)} target="_blank" rel="noreferrer">Aleph API</a>
+              {#if showSchedulerAllocationLink(instance)}
                 <a href={instanceSchedulerUrl(instance)} target="_blank" rel="noreferrer">Scheduler allocation</a>
-                {#if crnExecutionsUrl}
-                  <a href={crnExecutionsUrl} target="_blank" rel="noreferrer">CRN executions</a>
-                {/if}
+              {/if}
+              {#if crnExecutionsUrl}
+                <a href={crnExecutionsUrl} target="_blank" rel="noreferrer">CRN executions</a>
+              {/if}
               </div>
             </div>
             {#if instanceActionFeedback[instance.item_hash]}
               <div class="instance-detail-wide">
-                <span>Delete</span>
+                <span>Action</span>
                 <strong
                   class:instance-feedback-info={instanceActionFeedback[instance.item_hash]?.tone === 'info'}
                   class:instance-feedback-error={instanceActionFeedback[instance.item_hash]?.tone === 'error'}
