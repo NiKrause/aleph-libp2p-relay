@@ -51,13 +51,35 @@ To build the alternative OrbitDB relay image instead of the default
 `py-libp2p` image:
 
 ```bash
+cd relay-deployer-pwa
 ROOTFS_PROFILE=orbitdb-relay-pinner \
 ORBITDB_RELAY_PINNER_DIR=/Users/nandi/orbitdb-relay-pinner \
 rootfs/build-rootfs.sh
 cp dist-rootfs/rootfs-manifest.json public/rootfs-manifest.json
 ```
 
-For troubleshooting you can still force the older fully baked image path:
+That profile now builds a prebaked image by default. Node.js, production
+dependencies, and the `orbitdb-relay-pinner` wrapper are installed into the
+qcow2 during the build. The systemd service is enabled, but held behind a ready
+file until you provide the externally assigned Aleph host ports.
+
+After deploying the VM and once Aleph shows the mapped host ports, SSH in and
+run:
+
+```bash
+/usr/local/sbin/orbitdb-relay-pinner-configure.sh \
+  --public-ipv4 PUBLIC_IP \
+  --tcp-port HOST_TCP_PORT \
+  --ws-port HOST_WS_PORT \
+  --webrtc-port HOST_WEBRTC_PORT \
+  --quic-port HOST_QUIC_PORT
+```
+
+That writes `VITE_APPEND_ANNOUNCE`, creates
+`/etc/default/orbitdb-relay-pinner.ready`, and starts the relay service.
+
+For the default `py-libp2p` profile you can still force the older fully baked
+image path:
 
 ```bash
 ROOTFS_INSTALL_MODE=prebaked rootfs/build-rootfs.sh

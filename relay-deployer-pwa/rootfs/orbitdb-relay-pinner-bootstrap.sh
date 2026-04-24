@@ -2,16 +2,10 @@
 set -euo pipefail
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/orbitdb-relay-pinner}"
-SERVICE_NAME="${SERVICE_NAME:-orbitdb-relay-pinner}"
 SERVICE_USER="${SERVICE_USER:-orbitdb-relay}"
 DATA_DIR="${DATA_DIR:-/var/lib/orbitdb-relay-pinner}"
 ENV_FILE="${ENV_FILE:-/etc/default/orbitdb-relay-pinner}"
-BOOTSTRAP_STAMP="${BOOTSTRAP_STAMP:-}"
-
-if [ -n "${BOOTSTRAP_STAMP}" ] && [ -f "${BOOTSTRAP_STAMP}" ]; then
-  echo "orbitdb-relay-pinner bootstrap already completed at ${BOOTSTRAP_STAMP}."
-  exit 0
-fi
+NODE_MIN_MAJOR="${NODE_MIN_MAJOR:-22}"
 
 if [ ! -d "${INSTALL_DIR}" ]; then
   echo "Missing ${INSTALL_DIR}; the rootfs build did not copy orbitdb-relay-pinner."
@@ -22,7 +16,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y ca-certificates curl gnupg python3 build-essential
 
-if ! command -v node >/dev/null 2>&1 || [ "$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0)" -lt 22 ]; then
+if ! command -v node >/dev/null 2>&1 || [ "$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0)" -lt "${NODE_MIN_MAJOR}" ]; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y nodejs
 fi
@@ -30,7 +24,7 @@ fi
 rm -rf /var/lib/apt/lists/*
 
 if ! command -v node >/dev/null 2>&1; then
-  echo "Node.js 22+ installation failed." >&2
+  echo "Node.js ${NODE_MIN_MAJOR}+ installation failed." >&2
   exit 1
 fi
 
@@ -39,7 +33,7 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-mkdir -p "${DATA_DIR}"
+mkdir -p "${DATA_DIR}" "$(dirname "${ENV_FILE}")"
 
 if ! id "${SERVICE_USER}" >/dev/null 2>&1; then
   useradd --system --home "${DATA_DIR}" --create-home --shell /usr/sbin/nologin "${SERVICE_USER}"
@@ -70,12 +64,40 @@ fi
 mkdir -p "${INSTALL_DIR}/node_modules"
 ln -sfn "${INSTALL_DIR}" "${INSTALL_DIR}/node_modules/orbitdb-relay-pinner"
 
+cat > /usr/local/bin/orbitdb-relay-pinner <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exec /usr/bin/node /opt/orbitdb-relay-pinner/dist/cli.js "$@"
+EOF
+chmod 0755 /usr/local/bin/orbitdb-relay-pinner
+
 if [ -f "${INSTALL_DIR}/deploy/orbitdb-relay-pinner.env.example" ] && [ ! -f "${ENV_FILE}" ]; then
   cp "${INSTALL_DIR}/deploy/orbitdb-relay-pinner.env.example" "${ENV_FILE}"
-  chmod 0640 "${ENV_FILE}"
-  chown "root:${SERVICE_USER}" "${ENV_FILE}"
 fi
 
-if [ -n "${BOOTSTRAP_STAMP}" ]; then
-  touch "${BOOTSTRAP_STAMP}"
-fi
+touch "${ENV_FILE}"
+chmod 0640 "${ENV_FILE}"
+chown "root:${SERVICE_USER}" "${ENV_FILE}"
+
+write_env_var() {
+  local key="$1"
+  local value="$2"
+
+  if grep -Eq "^[#[:space:]]*${key}=" "${ENV_FILE}"; then
+    sed -i "s|^[#[:space:]]*${key}=.*|${key}=${value}|" "${ENV_FILE}"
+  else
+    printf '%s=%s\n' "${key}" "${value}" >> "${ENV_FILE}"
+  fi
+}
+
+write_env_var "DATASTORE_PATH" "${DATA_DIR}"
+write_env_var "METRICS_PORT" "9090"
+write_env_var "METRICS_HTTPS_ENABLED" "1"
+write_env_var "METRICS_HTTPS_PORT" "9443"
+write_env_var "RELAY_TCP_PORT" "9091"
+write_env_var "RELAY_WS_PORT" "9092"
+write_env_var "RELAY_WEBRTC_PORT" "9093"
+write_env_var "RELAY_QUIC_PORT" "9094"
+write_env_var "ENABLE_GENERAL_LOGS" "1"
+write_env_var "DEBUG" "'libp2p:auto-tls,libp2p:auto-tls:*,libp2p:websockets:listener'"
+

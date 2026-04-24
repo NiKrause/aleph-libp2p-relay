@@ -6,7 +6,7 @@ APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${APP_DIR}/.." && pwd)"
 OUT_DIR="${OUT_DIR:-${APP_DIR}/dist-rootfs}"
 ROOTFS_PROFILE="${ROOTFS_PROFILE:-py-libp2p}"
-ROOTFS_INSTALL_MODE="${ROOTFS_INSTALL_MODE:-thin}"
+ROOTFS_INSTALL_MODE="${ROOTFS_INSTALL_MODE:-}"
 ROOTFS_SIZE_MIB="${ROOTFS_SIZE_MIB:-20480}"
 CHANNEL="${CHANNEL:-ALEPH-CLOUDSOLUTIONS}"
 SKIP_UPLOAD="${SKIP_UPLOAD:-0}"
@@ -18,10 +18,16 @@ case "${ROOTFS_PROFILE}" in
   py-libp2p)
     IMAGE_BASENAME="aleph-py-libp2p-relay.qcow2"
     DEFAULT_ROOTFS_VERSION="py-libp2p-relay-v0.1.0"
+    if [ -z "${ROOTFS_INSTALL_MODE}" ]; then
+      ROOTFS_INSTALL_MODE="thin"
+    fi
     ;;
   orbitdb-relay-pinner)
     IMAGE_BASENAME="aleph-orbitdb-relay-pinner.qcow2"
     DEFAULT_ROOTFS_VERSION="orbitdb-relay-pinner-v0.1.0"
+    if [ -z "${ROOTFS_INSTALL_MODE}" ]; then
+      ROOTFS_INSTALL_MODE="prebaked"
+    fi
     ;;
   *)
     echo "Unsupported ROOTFS_PROFILE: ${ROOTFS_PROFILE}" >&2
@@ -135,7 +141,8 @@ required_port_forwards_json() {
     { "port": 9091, "tcp": true, "udp": false, "purpose": "libp2p TCP" },
     { "port": 9092, "tcp": true, "udp": false, "purpose": "libp2p WebSocket" },
     { "port": 9093, "tcp": false, "udp": true, "purpose": "WebRTC direct" },
-    { "port": 9094, "tcp": false, "udp": true, "purpose": "QUIC" }
+    { "port": 9094, "tcp": false, "udp": true, "purpose": "QUIC" },
+    { "port": 9443, "tcp": true, "udp": false, "purpose": "Metrics HTTPS" }
   ],
 EOF
       ;;

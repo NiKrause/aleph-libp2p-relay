@@ -15,9 +15,15 @@ The builder supports two rootfs profiles:
 - `py-libp2p` (default): copies the local `py-libp2p` tree and enables `py-libp2p-relay.service`.
 - `orbitdb-relay-pinner`: copies a minimal local `orbitdb-relay-pinner` payload and enables `orbitdb-relay-pinner.service` using the upstream `deploy/` files from that repo.
 
-By default the builder now creates a `thin` rootfs image. That image uploads much
-less data to Aleph, but the VM installs runtime packages and application
-dependencies on first boot before the relay service becomes healthy.
+By default the builder now uses profile-specific install modes:
+
+- `py-libp2p`: `thin`
+- `orbitdb-relay-pinner`: `prebaked`
+
+`thin` uploads less data to Aleph, but the VM installs runtime packages and
+application dependencies on first boot before the relay service becomes
+healthy. `prebaked` produces a larger qcow2, but the runtime is already present
+inside the image.
 
 ## Build
 
@@ -38,7 +44,7 @@ This builds the default `py-libp2p` image. The script:
 4. Uploads the finished image to Aleph's IPFS add endpoint and then registers it with `aleph file pin`.
 5. Writes `dist-rootfs/rootfs-manifest.json`.
 
-Thin mode is the default:
+Install mode options:
 
 - `ROOTFS_INSTALL_MODE=thin`: defer runtime package installation and dependency
   setup to first boot.
@@ -125,32 +131,47 @@ pnpm build
 
 ### `orbitdb-relay-pinner`
 
-- Metrics/health port: `28190`
-- Relay TCP/WS/WebRTC ports: `28191`, `28192`, `28193`
+- Metrics/health port: `9090`
+- Metrics HTTPS port: `9443`
+- Relay TCP/WS/WebRTC/QUIC ports: `9091`, `9092`, `9093`, `9094`
 - Service name: `orbitdb-relay-pinner`
 - Install directory: `/opt/orbitdb-relay-pinner`
 - Environment file: `/etc/default/orbitdb-relay-pinner`
 - Data directory: `/var/lib/orbitdb-relay-pinner`
-- Bootstrap service: `orbitdb-relay-pinner-bootstrap`
-- Bootstrap stamp: `/var/lib/orbitdb-relay-pinner/bootstrap-complete`
+- Configure helper: `/usr/local/sbin/orbitdb-relay-pinner-configure.sh`
+- Ready file: `/etc/default/orbitdb-relay-pinner.ready`
 
 The OrbitDB profile copies the upstream `deploy/orbitdb-relay-pinner.service`
 and `deploy/orbitdb-relay-pinner.env.example` from the source checkout into the
-image. It does not try to guess the final public IP inside the rootfs build, so
-you should review `/etc/default/orbitdb-relay-pinner` after boot and set
-`VITE_APPEND_ANNOUNCE` or any port overrides to match the target host.
+image, installs Node.js 22 and production dependencies during the image build,
+and leaves the service enabled but gated by `/etc/default/orbitdb-relay-pinner.ready`.
+It does not try to guess the final public IP or host-mapped Aleph ports inside
+the rootfs build.
+
+After deployment, once Aleph has assigned the external host ports, connect over
+SSH and run:
+
+```bash
+/usr/local/sbin/orbitdb-relay-pinner-configure.sh \
+  --public-ipv4 PUBLIC_IP \
+  --tcp-port HOST_TCP_PORT \
+  --ws-port HOST_WS_PORT \
+  --webrtc-port HOST_WEBRTC_PORT \
+  --quic-port HOST_QUIC_PORT
+```
+
+That writes `VITE_APPEND_ANNOUNCE`, creates the ready file, and starts the
+relay with the prebaked runtime.
 
 ## First-Boot Requirements
 
 Thin images require outbound network access on first boot:
 
 - `py-libp2p` installs Python, build dependencies, and the virtualenv on boot.
-- `orbitdb-relay-pinner` installs Node.js 22 and production dependencies on boot.
 
 Expect the first boot to take noticeably longer than subsequent reboots. Use
 `journalctl -u py-libp2p-relay-bootstrap` or
-`journalctl -u orbitdb-relay-pinner-bootstrap` to troubleshoot bootstrap
-failures.
+`journalctl -u orbitdb-relay-pinner` to troubleshoot relay startup failures.
 
 The image must stay public and reproducible. Do not bake wallet keys, tokens,
 private SSH keys, API credentials, or user-specific configuration into it.

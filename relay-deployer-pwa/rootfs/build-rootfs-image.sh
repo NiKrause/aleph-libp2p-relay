@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${APP_DIR}/.." && pwd)"
 ROOTFS_PROFILE="${ROOTFS_PROFILE:-py-libp2p}"
-ROOTFS_INSTALL_MODE="${ROOTFS_INSTALL_MODE:-thin}"
+ROOTFS_INSTALL_MODE="${ROOTFS_INSTALL_MODE:-}"
 PY_LIBP2P_DIR="${PY_LIBP2P_DIR:-${REPO_DIR}/py-libp2p}"
 ORBITDB_RELAY_PINNER_DIR="${ORBITDB_RELAY_PINNER_DIR:-}"
 OUT_DIR="${OUT_DIR:-${APP_DIR}/dist-rootfs}"
@@ -25,20 +25,13 @@ require qemu-img
 require virt-customize
 require tar
 
-case "${ROOTFS_INSTALL_MODE}" in
-  thin|prebaked)
-    ;;
-  *)
-    echo "Unsupported ROOTFS_INSTALL_MODE: ${ROOTFS_INSTALL_MODE}" >&2
-    echo "Expected one of: thin, prebaked" >&2
-    exit 1
-    ;;
-esac
-
 case "${ROOTFS_PROFILE}" in
   py-libp2p)
     IMAGE="${OUT_DIR}/aleph-py-libp2p-relay.qcow2"
     APP_TAR="${OUT_DIR}/py-libp2p.tar"
+    if [ -z "${ROOTFS_INSTALL_MODE}" ]; then
+      ROOTFS_INSTALL_MODE="thin"
+    fi
     if [ ! -d "${PY_LIBP2P_DIR}" ]; then
       echo "Missing py-libp2p directory: ${PY_LIBP2P_DIR}" >&2
       exit 1
@@ -47,6 +40,9 @@ case "${ROOTFS_PROFILE}" in
   orbitdb-relay-pinner)
     IMAGE="${OUT_DIR}/aleph-orbitdb-relay-pinner.qcow2"
     APP_TAR="${OUT_DIR}/orbitdb-relay-pinner.tar"
+    if [ -z "${ROOTFS_INSTALL_MODE}" ]; then
+      ROOTFS_INSTALL_MODE="prebaked"
+    fi
     if [ -z "${ORBITDB_RELAY_PINNER_DIR}" ]; then
       echo "ROOTFS_PROFILE=orbitdb-relay-pinner requires ORBITDB_RELAY_PINNER_DIR=/path/to/orbitdb-relay-pinner" >&2
       exit 1
@@ -60,10 +56,25 @@ case "${ROOTFS_PROFILE}" in
       echo "Build orbitdb-relay-pinner before creating this rootfs image." >&2
       exit 1
     fi
+    if [ "${ROOTFS_INSTALL_MODE}" = "thin" ]; then
+      echo "ROOTFS_PROFILE=orbitdb-relay-pinner now requires ROOTFS_INSTALL_MODE=prebaked." >&2
+      echo "The runtime is installed into the image, then configured with mapped ports before first start." >&2
+      exit 1
+    fi
     ;;
   *)
     echo "Unsupported ROOTFS_PROFILE: ${ROOTFS_PROFILE}" >&2
     echo "Expected one of: py-libp2p, orbitdb-relay-pinner" >&2
+    exit 1
+    ;;
+esac
+
+case "${ROOTFS_INSTALL_MODE}" in
+  thin|prebaked)
+    ;;
+  *)
+    echo "Unsupported ROOTFS_INSTALL_MODE: ${ROOTFS_INSTALL_MODE}" >&2
+    echo "Expected one of: thin, prebaked" >&2
     exit 1
     ;;
 esac
@@ -134,18 +145,14 @@ case "${ROOTFS_PROFILE}" in
       --mkdir /etc/systemd/system/orbitdb-relay-pinner.service.d
       --copy-in "${APP_TAR}:/opt"
       --copy-in "${SCRIPT_DIR}/orbitdb-relay-pinner-bootstrap.sh:/usr/local/sbin"
-      --copy-in "${SCRIPT_DIR}/orbitdb-relay-pinner-bootstrap.service:/etc/systemd/system"
+      --copy-in "${SCRIPT_DIR}/orbitdb-relay-pinner-configure.sh:/usr/local/sbin"
       --copy-in "${SCRIPT_DIR}/orbitdb-relay-pinner-bootstrap.conf:/etc/systemd/system/orbitdb-relay-pinner.service.d"
       --run-command "tar -xf /opt/$(basename "${APP_TAR}") -C /opt/orbitdb-relay-pinner"
       --run-command "chmod 0755 /usr/local/sbin/orbitdb-relay-pinner-bootstrap.sh"
+      --run-command "chmod 0755 /usr/local/sbin/orbitdb-relay-pinner-configure.sh"
       --run-command "cp /opt/orbitdb-relay-pinner/deploy/orbitdb-relay-pinner.service /etc/systemd/system/orbitdb-relay-pinner.service"
+      --run-command "INSTALL_DIR=/opt/orbitdb-relay-pinner DATA_DIR=/var/lib/orbitdb-relay-pinner ENV_FILE=/etc/default/orbitdb-relay-pinner SERVICE_USER=orbitdb-relay /usr/local/sbin/orbitdb-relay-pinner-bootstrap.sh"
     )
-
-    if [ "${ROOTFS_INSTALL_MODE}" = "prebaked" ]; then
-      orbitdb_customize_args+=(
-        --run-command "BOOTSTRAP_STAMP=/var/lib/orbitdb-relay-pinner/bootstrap-complete SERVICE_NAME=orbitdb-relay-pinner /usr/local/sbin/orbitdb-relay-pinner-bootstrap.sh"
-      )
-    fi
 
     orbitdb_customize_args+=(
       --run-command "systemctl enable orbitdb-relay-pinner.service"
