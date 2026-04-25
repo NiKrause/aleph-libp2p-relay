@@ -5,6 +5,7 @@ import os
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 
 ENV_FILE = os.environ.get("ENV_FILE", "/etc/default/orbitdb-relay-pinner")
@@ -28,6 +29,9 @@ def _validate_port(value: object, field_name: str) -> str:
 class Handler(BaseHTTPRequestHandler):
     server_version = "OrbitdbRelaySetup/1.0"
 
+    def _request_path(self) -> str:
+        return urlsplit(self.path).path
+
     def _send_json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
@@ -46,7 +50,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802
-        if self.path not in ("/", "/health"):
+        if self._request_path() not in ("/", "/health"):
             self._send_json(404, {"status": "not-found"})
             return
 
@@ -60,7 +64,7 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/configure":
+        if self._request_path() != "/configure":
             self._send_json(404, {"status": "not-found"})
             return
 
