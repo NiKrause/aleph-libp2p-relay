@@ -447,44 +447,6 @@ textarea:focus {
   margin-top: 5px;
 }
 
-.hold-summary {
-  display: grid;
-  gap: 4px;
-  margin: 0 0 18px;
-  padding: 12px 14px;
-  border: 1px solid #dbeafe;
-  border-radius: 8px;
-  background: #eff6ff;
-}
-
-.hold-summary strong,
-.hold-summary span {
-  display: block;
-  overflow-wrap: anywhere;
-}
-
-.hold-summary span {
-  color: #64748b;
-}
-
-.hold-summary.hold-summary-ok {
-  border-color: #86efac;
-  background: #f0fdf4;
-}
-
-.hold-summary.hold-summary-ok strong {
-  color: #166534;
-}
-
-.hold-summary.hold-summary-danger {
-  border-color: #fca5a5;
-  background: #fef2f2;
-}
-
-.hold-summary.hold-summary-danger strong {
-  color: #b91c1c;
-}
-
 .rootfs-panel {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

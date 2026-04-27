@@ -12,7 +12,7 @@ const manifest: RootfsManifest = {
 }
 
 const pricing: InstancePricing = {
-  price: { compute_unit: { holding: '1000', credit: '14250' } },
+  price: { compute_unit: { credit: '14250' } },
   compute_unit: { vcpus: 1, memory_mib: 2048, disk_mib: 20480 },
   tiers: [{ id: 'tier-1', compute_units: 1 }]
 }
@@ -43,8 +43,8 @@ describe('Aleph instance message helpers', () => {
     expect(content.environment.aleph_api).toBe(true)
     expect(content.environment.reproducible).toBe(false)
     expect(content.environment.shared_cache).toBe(false)
-    expect(content.payment.type).toBe('hold')
-    expect(content.payment.chain).toBe('ETH')
+    expect(content.payment.type).toBe('credit')
+    expect(content.payment.chain).toBeUndefined()
   })
 
   it('builds instance content with an Aleph base-image rootfs reference', () => {

@@ -568,9 +568,12 @@ describe('Aleph API client', () => {
     await expect(
       configureOrbitdbRelaySetup({
         hostIpv4: '62.141.40.252',
+        publicIpv6: '2a01:4f8:c010:4b5::42',
         setupPort: 28080,
         tcpPort: 28191,
         wsPort: 28192,
+        metricsPort: 28190,
+        metricsHttpsPort: 29443,
         webrtcPort: 28193,
         quicPort: 28194
       })
@@ -585,8 +588,11 @@ describe('Aleph API client', () => {
     })
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
       public_ipv4: '62.141.40.252',
+      public_ipv6: '2a01:4f8:c010:4b5::42',
       tcp_port: 28191,
       ws_port: 28192,
+      metrics_port: 28190,
+      metrics_https_port: 29443,
       webrtc_port: 28193,
       quic_port: 28194
     })

@@ -72,10 +72,18 @@ export function crnLocationLabel(crn: Crn): string | null {
   return parts.length > 0 ? parts.join(', ') : null
 }
 
+export function crnScoreLabel(crn: Crn): string | null {
+  const score = toNumber(crn.score)
+  if (!Number.isFinite(score)) return null
+  return formatNumber(score, 2)
+}
+
 export function crnDisplayLabel(crn: Crn): string {
   const label = crn.name || shortHash(crn.hash)
   const host = crnHost(crn.address)
   const location = crnLocationLabel(crn)
+  const score = crnScoreLabel(crn)
+  const prefix = score ? `${score} · ` : ''
 
-  return location ? `${label} - ${host} (${location})` : `${label} - ${host}`
+  return location ? `${prefix}${label} - ${host} (${location})` : `${prefix}${label} - ${host}`
 }

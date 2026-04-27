@@ -82,8 +82,13 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             public_ipv4 = str(ipaddress.ip_address(payload.get("public_ipv4")))
+            public_ipv6 = payload.get("public_ipv6")
+            if public_ipv6 is not None:
+                public_ipv6 = str(ipaddress.ip_address(public_ipv6))
             tcp_port = _validate_port(payload.get("tcp_port"), "tcp_port")
             ws_port = _validate_port(payload.get("ws_port"), "ws_port")
+            metrics_port = payload.get("metrics_port")
+            metrics_https_port = payload.get("metrics_https_port")
             webrtc_port = payload.get("webrtc_port")
             quic_port = payload.get("quic_port")
             args = [
@@ -95,6 +100,17 @@ class Handler(BaseHTTPRequestHandler):
                 "--ws-port",
                 ws_port,
             ]
+            if public_ipv6 is not None:
+                args.extend(["--public-ipv6", public_ipv6])
+            if metrics_port is not None:
+                args.extend(["--metrics-port", _validate_port(metrics_port, "metrics_port")])
+            if metrics_https_port is not None:
+                args.extend(
+                    [
+                        "--metrics-https-port",
+                        _validate_port(metrics_https_port, "metrics_https_port"),
+                    ]
+                )
             if webrtc_port is not None:
                 args.extend(["--webrtc-port", _validate_port(webrtc_port, "webrtc_port")])
             if quic_port is not None:

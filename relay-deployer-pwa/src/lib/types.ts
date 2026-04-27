@@ -107,6 +107,9 @@ export interface Crn {
   hash: string
   name: string
   address: string
+  score?: number | string | null
+  performance?: number | string | null
+  decentralization?: number | string | null
   qemu_support?: boolean
   confidential_support?: boolean
   gpu_support?: boolean
@@ -118,6 +121,8 @@ export interface Crn {
   country?: string | null
   country_code?: string | null
   location?: CrnLocation | string | null
+  resolved_ip?: string | null
+  geo_source?: string | null
 }
 
 export interface CrnListResponse {
@@ -131,19 +136,16 @@ export interface TierSpec {
 }
 
 export interface PaymentQuote {
-  mode: PaymentMode
   required: number
   available: number
   computeUnits: number
   unitPrice: number
-  label: 'ALEPH held' | 'credits'
+  label: 'credits'
 }
 
 export interface DeploymentForm {
   name: string
   sshPublicKey: string
-  paymentMode: PaymentMode
-  paymentChain: PaymentChain
   rootfsSourceMode: RootfsSourceMode
   baseRootfs: AlephBaseRootfs
   tierId: string

@@ -4,7 +4,7 @@
   "rootfsInstallStrategy": "prebaked",
   "requiresBootstrapNetwork": false,
   "bootstrapSummary": "Dependencies are preinstalled in the image.",
-  "rootfsSourceSizeBytes": 1741640201,  "requiredPortForwards": [
+  "rootfsSourceSizeBytes": 1738428130,  "requiredPortForwards": [
     { "port": 22, "tcp": true, "udp": false, "purpose": "SSH" },
     { "port": 80, "tcp": true, "udp": false, "purpose": "Temporary setup endpoint" },
     { "port": 9090, "tcp": true, "udp": false, "purpose": "Metrics and health API" },
@@ -13,7 +13,7 @@
     { "port": 9093, "tcp": false, "udp": true, "purpose": "WebRTC direct" },
     { "port": 9094, "tcp": false, "udp": true, "purpose": "QUIC" },
     { "port": 9443, "tcp": true, "udp": false, "purpose": "Metrics HTTPS" }
-  ],  "rootfsItemHash": "1e88ef11ad7b03a67b77a5090f1f86dfc4ccae3ed50970da88310d9123db9847",
+  ],  "rootfsItemHash": "6831ebad6501af4d288ab58947132a4238e6b5076ae1eb865f6fc1574bc22241",
   "rootfsSizeMiB": 20480,
-  "createdAt": "2026-04-24T07:54:16Z"
+  "createdAt": "2026-04-27T04:12:16Z"
 }

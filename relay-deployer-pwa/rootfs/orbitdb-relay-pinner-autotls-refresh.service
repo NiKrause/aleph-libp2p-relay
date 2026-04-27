@@ -1,0 +1,19 @@
+[Unit]
+Description=Persist AutoTLS secure announce addresses for orbitdb-relay-pinner
+After=orbitdb-relay-pinner.service
+Wants=orbitdb-relay-pinner.service
+ConditionPathExists=/etc/default/orbitdb-relay-pinner.ready
+ConditionPathExists=!/etc/default/orbitdb-relay-pinner.autotls-ready
+
+[Service]
+Type=oneshot
+Environment=ENV_FILE=/etc/default/orbitdb-relay-pinner
+Environment=READY_FILE=/etc/default/orbitdb-relay-pinner.ready
+Environment=AUTOTLS_READY_FILE=/etc/default/orbitdb-relay-pinner.autotls-ready
+Environment=SERVICE_NAME=orbitdb-relay-pinner.service
+ExecStart=/usr/bin/python3 /usr/local/sbin/orbitdb-relay-pinner-autotls-refresh.py
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

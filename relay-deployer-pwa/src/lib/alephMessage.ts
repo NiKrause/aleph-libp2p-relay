@@ -27,10 +27,7 @@ export function createInstanceContent(args: {
   const spec = tierSpec(args.pricing, args.tier)
   const sshKey = normalizeSshPublicKey(args.form.sshPublicKey)
 
-  const requirements =
-    args.form.paymentMode === 'credit' && args.selectedCrn
-      ? { node: { node_hash: args.selectedCrn.hash } }
-      : undefined
+  const requirements = args.selectedCrn ? { node: { node_hash: args.selectedCrn.hash } } : undefined
   const rootfsRef =
     args.form.rootfsSourceMode === 'base'
       ? ALEPH_BASE_ROOTFS_ITEM_HASHES[args.form.baseRootfs]
@@ -63,8 +60,7 @@ export function createInstanceContent(args: {
       seconds: 30
     },
     payment: {
-      chain: args.form.paymentMode === 'hold' ? args.form.paymentChain : undefined,
-      type: args.form.paymentMode
+      type: 'credit'
     },
     requirements,
     volumes: [],

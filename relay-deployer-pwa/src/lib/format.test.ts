@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { crnDisplayLabel, crnLocationLabel, crnHost, shortHash } from './format'
+import { crnDisplayLabel, crnLocationLabel, crnHost, crnScoreLabel, shortHash } from './format'
 import type { Crn } from './types'
 
 describe('format helpers', () => {
@@ -45,5 +45,17 @@ describe('format helpers', () => {
     expect(crnDisplayLabel(crn)).toBe(
       `${shortHash(crn.hash)} - skyblue2.zhuxx.site (Dallas, United States)`
     )
+  })
+
+  it('formats and displays the CRN score when available', () => {
+    const crn: Crn = {
+      hash: 'b'.repeat(64),
+      name: 'NodeCity6',
+      address: 'https://ncc6dla.nodecity.city/',
+      score: 91.234
+    }
+
+    expect(crnScoreLabel(crn)).toBe('91.23')
+    expect(crnDisplayLabel(crn)).toBe('91.23 · NodeCity6 - ncc6dla.nodecity.city')
   })
 })

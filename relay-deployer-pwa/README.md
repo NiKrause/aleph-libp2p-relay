@@ -7,7 +7,12 @@ directly from the browser. There is no app server.
 
 - Connects MetaMask.
 - Loads live Aleph instance pricing, wallet balance, credits, and CRNs.
-- Offers `hold` and `credit` payment modes.
+- Enriches CRN labels with cached GeoIP lookups in browser `localStorage` when
+  the CRN list does not already include location metadata.
+  The current implementation resolves hostnames through Google DNS-over-HTTPS
+  and geolocates the resulting IPs with `country.is`, which is also
+  self-hostable later if needed.
+- Uses Aleph credits for deployments and selects a compatible CRN.
 - Supports Aleph-provided base images and custom pinned rootfs manifests.
 - Builds, signs, and broadcasts an Aleph `INSTANCE` message in the browser.
 - Lists previous Aleph instance messages for the connected wallet.
@@ -30,8 +35,9 @@ published through IPFS/Aleph hosting.
 
 ## Rootfs Sources
 
-The deploy form now defaults to Aleph-managed base images like Ubuntu 22 and Debian 12.
-That path does not require a custom `STORE` rootfs message.
+The deploy form now defaults to `Custom rootfs` whenever
+`public/rootfs-manifest.json` is valid. If no valid manifest is present, it
+falls back to Aleph-managed base images like Ubuntu 22 and Debian 12.
 
 If you want to use a custom qcow2 rootfs instead, keep using
 `public/rootfs-manifest.json` and build/upload the image first:
@@ -65,10 +71,20 @@ file until the mapped Aleph host ports are known.
 
 On first boot the image starts a temporary HTTP setup endpoint on internal port
 `80`. The PWA automatically calls that endpoint after Aleph reports the mapped
-host ports for internal `80`, `9091`, `9092`, `9093`, and `9094`. The endpoint
-then runs `/usr/local/sbin/orbitdb-relay-pinner-configure.sh`, writes
-`VITE_APPEND_ANNOUNCE`, creates `/etc/default/orbitdb-relay-pinner.ready`,
-starts `orbitdb-relay-pinner.service`, and shuts itself down.
+host ports for internal `80`, `9090`, `9091`, `9092`, `9093`, `9094`, and
+`9443`. The endpoint then runs
+`/usr/local/sbin/orbitdb-relay-pinner-configure.sh`, writes
+`VITE_APPEND_ANNOUNCE` plus the external relay/metrics port mapping variables,
+creates `/etc/default/orbitdb-relay-pinner.ready`, starts
+`orbitdb-relay-pinner.service`, and shuts itself down.
+
+After the relay is up, the image now runs a second local one-shot step that
+waits for AutoTLS to provision the secure hostname/certificate, polls the local
+API until AutoTLS readiness is visible, derives the secure external
+`/tls/sni/.../ws` and `/dns4|/dns6/.../tls/ws` announces from the mapped Aleph
+WS port plus the AutoTLS hostname, appends those secure announces to
+`VITE_APPEND_ANNOUNCE`, updates the metrics HTTPS public host, and restarts the
+relay once so secure WSS announces persist across reboots.
 
 That means the checked-in manifest for this profile must include `80/tcp` in
 `requiredPortForwards`, and you need to deploy the updated PWA together with a
@@ -82,7 +98,7 @@ For `orbitdb-relay-pinner`, the PWA now automates four separate steps:
 2. Publish the Aleph `port-forwarding` aggregate for the required ports from
    `public/rootfs-manifest.json`.
 3. Wait until the selected CRN exposes runtime networking details including
-   `host_ipv4` and `mapped_ports`.
+   `host_ipv4`, optional public IPv6, and `mapped_ports`.
 4. POST the mapped external host ports to the VM setup endpoint at
    `http://HOST_IP:HOST_PORT/configure`.
 
@@ -92,6 +108,16 @@ The setup endpoint then:
 - creates `/etc/default/orbitdb-relay-pinner.ready`
 - starts `orbitdb-relay-pinner.service`
 - shuts the temporary setup server down
+- starts `orbitdb-relay-pinner-autotls-refresh.service`
+
+That AutoTLS refresh step then:
+
+- waits for `/tls/ws` addresses on `http://127.0.0.1:9090/multiaddrs`
+- derives secure external AutoTLS announce addresses from the mapped WS port and SNI hostname
+- merges that secure external announce into `VITE_APPEND_ANNOUNCE`
+- writes `METRICS_HTTPS_PUBLIC_HOST` for `GET /health` and `GET /multiaddrs` URL hints
+- writes `/etc/default/orbitdb-relay-pinner.autotls-ready`
+- restarts `orbitdb-relay-pinner.service` once
 
 Important distinction:
 
@@ -156,7 +182,7 @@ ss -ltnp | grep ':80 '
 curl -v http://127.0.0.1/health
 curl -v -X POST http://127.0.0.1/configure \
   -H 'content-type: application/json' \
-  --data '{"public_ipv4":"PUBLIC_IP","tcp_port":TCP_PORT,"ws_port":WS_PORT,"webrtc_port":WEBRTC_PORT,"quic_port":QUIC_PORT}'
+  --data '{"public_ipv4":"PUBLIC_IP","public_ipv6":"PUBLIC_IPV6","tcp_port":TCP_PORT,"ws_port":WS_PORT,"metrics_port":METRICS_PORT,"metrics_https_port":METRICS_HTTPS_PORT,"webrtc_port":WEBRTC_PORT,"quic_port":QUIC_PORT}'
 ```
 
 3. Verify that the ready file exists and the relay is actually listening:
@@ -202,7 +228,6 @@ the Python `aleph-client` flow.
 
 ## Payment Notes
 
-- `hold`: requires enough unlocked ALEPH and supports standard tiers up to
-  tier 3 in the UI.
-- `credit`: requires enough Aleph credit balance and a selected CRN node hash.
+- Deployments are currently credit-only.
+- The PWA always requires enough Aleph credit balance and a selected CRN node hash.
 - Pricing is always fetched live; required amounts are not hardcoded.

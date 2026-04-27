@@ -140,8 +140,10 @@ pnpm build
 - Environment file: `/etc/default/orbitdb-relay-pinner`
 - Data directory: `/var/lib/orbitdb-relay-pinner`
 - Configure helper: `/usr/local/sbin/orbitdb-relay-pinner-configure.sh`
+- AutoTLS refresh helper: `/usr/local/sbin/orbitdb-relay-pinner-autotls-refresh.py`
 - Setup endpoint service: `orbitdb-relay-pinner-bootstrap.service`
 - Ready file: `/etc/default/orbitdb-relay-pinner.ready`
+- AutoTLS ready file: `/etc/default/orbitdb-relay-pinner.autotls-ready`
 
 The OrbitDB profile copies the upstream `deploy/orbitdb-relay-pinner.service`
 and `deploy/orbitdb-relay-pinner.env.example` from the source checkout into the
@@ -158,24 +160,45 @@ That endpoint runs:
 ```bash
 /usr/local/sbin/orbitdb-relay-pinner-configure.sh \
   --public-ipv4 PUBLIC_IP \
+  [--public-ipv6 PUBLIC_IPV6] \
   --tcp-port HOST_TCP_PORT \
   --ws-port HOST_WS_PORT \
+  [--metrics-port HOST_METRICS_PORT] \
+  [--metrics-https-port HOST_METRICS_HTTPS_PORT] \
   --webrtc-port HOST_WEBRTC_PORT \
   --quic-port HOST_QUIC_PORT
 ```
 
 After a successful configure call it writes `VITE_APPEND_ANNOUNCE`, creates the
-ready file, starts the relay with the prebaked runtime, and shuts the temporary
-HTTP endpoint down.
+ready file, persists external relay/metrics host port mapping values in
+`/etc/default/orbitdb-relay-pinner`, starts the relay with the prebaked runtime,
+and shuts the temporary HTTP endpoint down.
+
+After that first start, a second local systemd step waits for AutoTLS to obtain
+the secure hostname/certificate, polls the local metrics API until AutoTLS
+exposes both a serving zone and secure `/tls/ws` readiness, derives the secure
+external WebSocket announce using the Aleph-mapped external WS port together
+with the AutoTLS SNI hostname, appends secure `/ip4|/ip6 ... /tls/sni/.../ws`
+and `/dns4|/dns6 ... /tls/ws` announce variants to `VITE_APPEND_ANNOUNCE`,
+writes `METRICS_HTTPS_PUBLIC_HOST`, writes
+`/etc/default/orbitdb-relay-pinner.autotls-ready`, and restarts
+`orbitdb-relay-pinner.service` once so the secure WSS announce set survives
+reboots.
 
 ### Operational Notes
 
 - `orbitdb-relay-pinner.service` is gated by
   `/etc/default/orbitdb-relay-pinner.ready`
 - `orbitdb-relay-pinner-bootstrap.service` is only the temporary setup server
+- `orbitdb-relay-pinner-autotls-refresh.service` is the one-shot post-configure
+  watcher for secure external AutoTLS `/tls/sni/.../ws` announce addresses
 - if the bootstrap service is active and the relay service is skipped because of
   `ConditionPathExists=/etc/default/orbitdb-relay-pinner.ready`, the relay has
   not been configured yet
+- if `/etc/default/orbitdb-relay-pinner.ready` exists but
+  `/etc/default/orbitdb-relay-pinner.autotls-ready` does not, the relay has
+  started with plain mapped announces but has not yet persisted the secure
+  AutoTLS external WS announce address derived from the mapped Aleph port
 
 Expected listening ports after a successful configure step:
 
@@ -190,6 +213,7 @@ To verify the live VM after configure:
 
 ```bash
 systemctl status orbitdb-relay-pinner orbitdb-relay-pinner-bootstrap --no-pager -l
+systemctl status orbitdb-relay-pinner-autotls-refresh --no-pager -l
 ss -ltnup | grep -E ':(9090|9091|9092|9093|9094|9443)\b' || true
 ```
 
@@ -206,11 +230,27 @@ the setup server locally from inside the VM:
 curl -v http://127.0.0.1/health
 curl -v -X POST http://127.0.0.1/configure \
   -H 'content-type: application/json' \
-  --data '{"public_ipv4":"PUBLIC_IP","tcp_port":TCP_PORT,"ws_port":WS_PORT,"webrtc_port":WEBRTC_PORT,"quic_port":QUIC_PORT}'
+  --data '{"public_ipv4":"PUBLIC_IP","public_ipv6":"PUBLIC_IPV6","tcp_port":TCP_PORT,"ws_port":WS_PORT,"metrics_port":METRICS_PORT,"metrics_https_port":METRICS_HTTPS_PORT,"webrtc_port":WEBRTC_PORT,"quic_port":QUIC_PORT}'
 ```
 
 That local success proves the image build and configure helper are working even
 if browser-to-CRN reachability for the temporary external setup port is not.
+Once configured, you can then watch for `/tls/ws` on the local relay API and
+verify the persisted external secure announce:
+
+```bash
+curl -sS http://127.0.0.1:9090/multiaddrs
+journalctl -u orbitdb-relay-pinner-autotls-refresh -n 100 --no-pager
+grep '^AUTOTLS_SERVING_ZONE=' /etc/default/orbitdb-relay-pinner
+grep '^VITE_APPEND_ANNOUNCE=' /etc/default/orbitdb-relay-pinner
+```
+
+The persisted secure WebSocket announce uses the mapped external WS port, for example:
+
+```text
+/ip4/PUBLIC_IP/tcp/EXTERNAL_WS_PORT/tls/sni/IP_BASED_AUTOTLS_DOMAIN/ws
+/dns4/IP_BASED_AUTOTLS_DOMAIN/tcp/EXTERNAL_WS_PORT/tls/ws
+```
 
 ## First-Boot Requirements
 

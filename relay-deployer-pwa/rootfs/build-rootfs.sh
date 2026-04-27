@@ -56,6 +56,11 @@ require() {
   }
 }
 
+die() {
+  echo "$*" >&2
+  exit 1
+}
+
 resolve_aleph_bin() {
   if [ -n "${ALEPH_BIN:-}" ]; then
     printf '%s\n' "${ALEPH_BIN}"
@@ -203,16 +208,20 @@ upload_image() {
 
   require python3
   require curl
+  [ -f "${IMAGE}" ] || die "Rootfs image does not exist: ${IMAGE}"
 
   echo "Uploading ${IMAGE} to IPFS via ${IPFS_ADD_URL}..." >&2
-  curl --fail --silent --show-error \
+  : > "${OUT_DIR}/ipfs-add-response.jsonl"
+  if ! curl --fail --silent --show-error \
     -X POST \
     -F "file=@${IMAGE}" \
     "${IPFS_ADD_URL}" \
-    > "${OUT_DIR}/ipfs-add-response.jsonl"
+    > "${OUT_DIR}/ipfs-add-response.jsonl"; then
+    die "IPFS upload failed for ${IMAGE}"
+  fi
 
   local cid
-  cid="$(python3 - "${OUT_DIR}/ipfs-add-response.jsonl" <<'PY'
+  if ! cid="$(python3 - "${OUT_DIR}/ipfs-add-response.jsonl" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -228,21 +237,34 @@ if not cid:
 
 print(cid)
 PY
-)"
+)"; then
+    die "Failed to extract CID from ${OUT_DIR}/ipfs-add-response.jsonl"
+  fi
+  [ -n "${cid}" ] || die "IPFS upload returned an empty CID"
 
   echo "Pinning CID ${cid} on Aleph Cloud with ${aleph_bin}..." >&2
-  "${aleph_bin}" file pin "${cid}" \
+  : > "${OUT_DIR}/store-message.json"
+  if ! "${aleph_bin}" file pin "${cid}" \
     --channel "${CHANNEL}" \
-    > "${OUT_DIR}/store-message.json"
+    > "${OUT_DIR}/store-message.json"; then
+    die "Aleph pin failed for CID ${cid}"
+  fi
 
-  python3 - "${OUT_DIR}/store-message.json" <<'PY'
+  if ! python3 - "${OUT_DIR}/store-message.json" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-payload = json.loads(Path(sys.argv[1]).read_text())
+content = Path(sys.argv[1]).read_text().strip()
+if not content:
+    raise SystemExit("Aleph pin returned an empty response")
+
+payload = json.loads(content)
 print(payload["item_hash"])
 PY
+  then
+    die "Failed to extract item_hash from ${OUT_DIR}/store-message.json"
+  fi
 }
 
 mkdir -p "${OUT_DIR}"
@@ -258,6 +280,7 @@ if [ "${SKIP_BUILD}" != "1" ]; then
   fi
 else
   echo "SKIP_BUILD=1 set; reusing ${IMAGE}"
+  [ -f "${IMAGE}" ] || die "SKIP_BUILD=1 requested, but rootfs image is missing: ${IMAGE}"
 fi
 
 if [ "${SKIP_UPLOAD}" = "1" ]; then

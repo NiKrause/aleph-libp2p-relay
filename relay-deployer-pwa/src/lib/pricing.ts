@@ -38,7 +38,3 @@ export async function fetchInstancePricing(apiHost = ALEPH_API_HOST): Promise<Pr
     fetchedAt: Date.now()
   }
 }
-
-export function holdSupportedTiers(pricing: InstancePricing, maxComputeUnits: number) {
-  return pricing.tiers.filter((tier) => tier.compute_units <= maxComputeUnits)
-}

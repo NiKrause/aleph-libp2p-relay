@@ -256,9 +256,12 @@ export async function notifyCrnAllocation(
 
 export async function configureOrbitdbRelaySetup(args: {
   hostIpv4: string
+  publicIpv6?: string | null
   setupPort: number
   tcpPort: number
   wsPort: number
+  metricsPort?: number | null
+  metricsHttpsPort?: number | null
   webrtcPort?: number | null
   quicPort?: number | null
 }): Promise<{ status: 'configured' | 'unconfirmed' }> {
@@ -274,8 +277,11 @@ export async function configureOrbitdbRelaySetup(args: {
         },
         body: JSON.stringify({
           public_ipv4: args.hostIpv4,
+          public_ipv6: args.publicIpv6 ?? undefined,
           tcp_port: args.tcpPort,
           ws_port: args.wsPort,
+          metrics_port: args.metricsPort ?? undefined,
+          metrics_https_port: args.metricsHttpsPort ?? undefined,
           webrtc_port: args.webrtcPort ?? undefined,
           quic_port: args.quicPort ?? undefined
         }),

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  compatibleCrns,
   DEFAULT_DEPLOYMENT_FORM,
-  estimateRootfsStorageHolding,
   isValidSshPublicKey,
   normalizeSshPublicKey,
   validateDeployment
@@ -71,6 +71,7 @@ function validate(overrides = {}) {
       ...DEFAULT_DEPLOYMENT_FORM,
       rootfsSourceMode: 'custom',
       sshPublicKey: 'ssh-ed25519 AAAATEST',
+      selectedCrnHash: crns[0].hash,
       ...overrides
     },
     manifest,
@@ -84,21 +85,17 @@ function validate(overrides = {}) {
 }
 
 describe('validateDeployment', () => {
-  it('defaults hold deployments to the ETH payment chain', () => {
-    expect(DEFAULT_DEPLOYMENT_FORM.paymentMode).toBe('hold')
-    expect(DEFAULT_DEPLOYMENT_FORM.paymentChain).toBe('ETH')
+  it('defaults new deployments to credit-backed base-image instances', () => {
+    expect(DEFAULT_DEPLOYMENT_FORM.rootfsSourceMode).toBe('base')
+    expect(DEFAULT_DEPLOYMENT_FORM.selectedCrnHash).toBe('')
   })
 
-  it('estimates rootfs storage holding from source size and live storage pricing', () => {
-    expect(estimateRootfsStorageHolding(manifest, pricing)).toBeCloseTo(777.5104, 4)
-  })
-
-  it('accepts a funded hold deployment', () => {
+  it('accepts a funded credit deployment', () => {
     const result = validate()
 
     expect(result.ok).toBe(true)
-    expect(result.quote?.required).toBe(1000)
-    expect(result.quote?.available).toBe(4000)
+    expect(result.quote?.required).toBe(14250)
+    expect(result.quote?.available).toBe(60000)
   })
 
   it('normalizes SSH public keys to a single trimmed line', () => {
@@ -111,17 +108,18 @@ describe('validateDeployment', () => {
     expect(isValidSshPublicKey('not-a-key')).toBe(false)
   })
 
-  it('accepts a hold deployment when available ALEPH exactly matches the requirement', () => {
+  it('accepts a deployment when available credits exactly match the requirement', () => {
     const result = validateDeployment({
       form: {
         ...DEFAULT_DEPLOYMENT_FORM,
         rootfsSourceMode: 'custom',
-        sshPublicKey: 'ssh-ed25519 AAAATEST'
+        sshPublicKey: 'ssh-ed25519 AAAATEST',
+        selectedCrnHash: crns[0].hash
       },
       manifest,
       rootfsResolution,
       pricingState: { pricing, fetchedAt: 1000 },
-      balance: { ...balance, balance: '1000', locked_amount: '0' },
+      balance: { ...balance, credit_balance: 14250 },
       crns,
       rootfsVerified: true,
       now: 1000
@@ -129,41 +127,12 @@ describe('validateDeployment', () => {
 
     expect(result.ok).toBe(true)
     expect(result.errors).toEqual([])
-    expect(result.quote?.required).toBe(1000)
-    expect(result.quote?.available).toBe(1000)
-  })
-
-  it('rejects hold deployments above tier 3', () => {
-    const result = validate({ tierId: 'tier-4' })
-
-    expect(result.ok).toBe(false)
-    expect(result.errors).toContain('Hold payment is limited to standard instance tiers 1-3.')
-  })
-
-  it('uses unlocked ALEPH for hold balance checks', () => {
-    const result = validateDeployment({
-      form: {
-        ...DEFAULT_DEPLOYMENT_FORM,
-        rootfsSourceMode: 'custom',
-        sshPublicKey: 'ssh-ed25519 AAAATEST',
-        tierId: 'tier-3'
-      },
-      manifest,
-      rootfsResolution,
-      pricingState: { pricing, fetchedAt: 1000 },
-      balance: { ...balance, balance: '4500', locked_amount: '1000' },
-      crns,
-      rootfsVerified: true,
-      now: 1000
-    })
-
-    expect(result.ok).toBe(false)
-    expect(result.errors).toContain('Insufficient ALEPH held.')
+    expect(result.quote?.required).toBe(14250)
+    expect(result.quote?.available).toBe(14250)
   })
 
   it('accepts a funded credit deployment with a CRN', () => {
     const result = validate({
-      paymentMode: 'credit',
       tierId: 'tier-2',
       selectedCrnHash: crns[0].hash
     })
@@ -172,13 +141,25 @@ describe('validateDeployment', () => {
     expect(result.quote?.required).toBe(28500)
   })
 
+  it('sorts compatible CRNs by descending score', () => {
+    const ranked = compatibleCrns(
+      [
+        { ...crns[0], hash: 'c'.repeat(64), name: 'Lower', score: 71.5 },
+        { ...crns[0], hash: 'd'.repeat(64), name: 'Higher', score: 92.1 },
+        { ...crns[0], hash: 'e'.repeat(64), name: 'Unscored', score: null }
+      ],
+      { vcpus: 1, memoryMiB: 2048, diskMiB: 20480 }
+    )
+
+    expect(ranked.map((crn) => crn.name)).toEqual(['Higher', 'Lower', 'Unscored'])
+  })
+
   it('rejects credit deployments without enough credits', () => {
     const result = validateDeployment({
       form: {
         ...DEFAULT_DEPLOYMENT_FORM,
         rootfsSourceMode: 'custom',
         sshPublicKey: 'ssh-ed25519 AAAATEST',
-        paymentMode: 'credit',
         selectedCrnHash: crns[0].hash
       },
       manifest,
@@ -194,12 +175,20 @@ describe('validateDeployment', () => {
     expect(result.errors).toContain('Insufficient credits.')
   })
 
+  it('rejects deployments without a selected CRN', () => {
+    const result = validate({ selectedCrnHash: '' })
+
+    expect(result.ok).toBe(false)
+    expect(result.errors).toContain('Credit deployments require a selected CRN.')
+  })
+
   it('rejects deployments while the rootfs store message is still pending', () => {
     const result = validateDeployment({
       form: {
         ...DEFAULT_DEPLOYMENT_FORM,
         rootfsSourceMode: 'custom',
-        sshPublicKey: 'ssh-ed25519 AAAATEST'
+        sshPublicKey: 'ssh-ed25519 AAAATEST',
+        selectedCrnHash: crns[0].hash
       },
       manifest,
       rootfsResolution: { ...rootfsResolution, messageStatus: 'pending', gatewayStatus: 'timeout' },
@@ -219,7 +208,8 @@ describe('validateDeployment', () => {
       form: {
         ...DEFAULT_DEPLOYMENT_FORM,
         rootfsSourceMode: 'custom',
-        sshPublicKey: 'ssh-ed25519 AAAATEST'
+        sshPublicKey: 'ssh-ed25519 AAAATEST',
+        selectedCrnHash: crns[0].hash
       },
       manifest,
       rootfsResolution: { ...rootfsResolution, messageStatus: 'pending', gatewayStatus: 'reachable' },
@@ -263,7 +253,8 @@ describe('validateDeployment', () => {
         ...DEFAULT_DEPLOYMENT_FORM,
         sshPublicKey: 'ssh-ed25519 AAAATEST',
         rootfsSourceMode: 'base',
-        baseRootfs: 'ubuntu22'
+        baseRootfs: 'ubuntu22',
+        selectedCrnHash: crns[0].hash
       },
       manifest: null,
       rootfsResolution: null,
@@ -276,6 +267,6 @@ describe('validateDeployment', () => {
 
     expect(result.ok).toBe(true)
     expect(result.errors).toEqual([])
-    expect(result.quote?.required).toBe(1000)
+    expect(result.quote?.required).toBe(14250)
   })
 })

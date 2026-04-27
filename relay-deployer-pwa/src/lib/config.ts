@@ -6,12 +6,8 @@ export const ALEPH_AGGREGATE_ADDRESS = '0xFba561a84A537fCaa567bb7A2257e7142701ae
 export const CRN_LIST_URL = 'https://crns-list.aleph.sh/crns.json'
 export const ROOTFS_MANIFEST_URL = './rootfs-manifest.json'
 export const IPFS_GATEWAY_BASE_URL = 'https://ipfs.aleph.cloud/ipfs/'
-export const ALEPH_HOLDING_DOCS_URL = 'https://docs.aleph.cloud/devhub/deploying-and-hosting/web-hosting/'
-export const ALEPH_SUPPORTED_CHAINS_DOCS_URL = 'https://docs.aleph.cloud/about/network/supported-blockchains/'
 export const ALEPH_INSTANCE_DOCS_URL = 'https://docs.aleph.cloud/devhub/sdks-and-tools/aleph-cli/commands/instance.html'
 export const PRICE_STALE_MS = 5 * 60 * 1000
-export const HOLD_MAX_COMPUTE_UNITS = 4
-export const DEFAULT_PAYMENT_CHAIN: PaymentChain = 'ETH'
 export const DEFAULT_BASE_ROOTFS: AlephBaseRootfs = 'ubuntu22'
 
 export const ALEPH_BASE_ROOTFS_OPTIONS: Array<{

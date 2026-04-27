@@ -14,24 +14,18 @@
   import {
     DEFAULT_DEPLOYMENT_FORM,
     compatibleCrns,
-    estimateRootfsStorageHolding,
     normalizeSshPublicKey,
     selectedTier,
     tierSpec,
     validateDeployment
   } from './lib/deployment'
-  import { crnDisplayLabel, explorerUrl, apiMessageUrl, dateLabel, formatNumber, shortHash } from './lib/format'
-  import { fetchInstancePricing, holdSupportedTiers } from './lib/pricing'
+  import { enrichCrnsWithGeo } from './lib/crnGeo'
+  import { crnDisplayLabel, crnLocationLabel, crnScoreLabel, explorerUrl, apiMessageUrl, dateLabel, formatNumber, shortHash } from './lib/format'
+  import { fetchInstancePricing } from './lib/pricing'
   import { ensureInstancePortForwards, portForwardLabel } from './lib/portForwarding'
   import { loadRootfsManifest, resolveRootfsReference, verifyRootfsExists } from './lib/rootfsManifest'
-  import { connectWallet, fetchAlephTokenBalance, switchPaymentChain, type WalletState } from './lib/wallet'
-  import {
-    ALEPH_BASE_ROOTFS_OPTIONS,
-    ALEPH_HOLDING_DOCS_URL,
-    ALEPH_INSTANCE_DOCS_URL,
-    ALEPH_SUPPORTED_CHAINS_DOCS_URL,
-    HOLD_MAX_COMPUTE_UNITS
-  } from './lib/config'
+  import { connectWallet, type WalletState } from './lib/wallet'
+  import { ALEPH_BASE_ROOTFS_OPTIONS, ALEPH_INSTANCE_DOCS_URL } from './lib/config'
   import type {
     BalanceResponse,
     Crn,
@@ -67,17 +61,13 @@
   let instanceSetupApplied: Record<string, string> = {}
   let instanceSetupAttempted: Record<string, string> = {}
   let instanceSetupPendingReachability: Record<string, string> = {}
+  let crnGeoLookupInFlight: Record<string, boolean> = {}
   let networkBusy = false
   let walletBusy = false
   let deployBusy = false
   let statusText = 'Ready'
   let errorText = ''
-  let selectedChainWalletBalance: number | null = null
-  let selectedChainWalletBalanceError = ''
-  let selectedChainWalletBalanceBusy = false
-  let selectedChainBalanceRequestKey = ''
   let sshPublicKeyStorageReady = false
-  const paymentChains: DeploymentForm['paymentChain'][] = ['ETH', 'BASE', 'AVAX']
   const rootfsSourceModes: DeploymentForm['rootfsSourceMode'][] = ['base', 'custom']
   const SSH_PUBLIC_KEY_STORAGE_KEY = 'aleph-relay-deployer:ssh-public-key'
   const ALEPH_SCHEDULER_ALLOCATION_BASE_URL = 'https://scheduler.api.aleph.cloud/api/v0/allocation'
@@ -107,7 +97,6 @@
   $: rootfsDisplayLabel = usingBaseRootfs
     ? selectedBaseRootfs.label
     : rootfsState.manifest?.version ?? 'missing'
-  $: rootfsStorageHolding = usingBaseRootfs ? null : estimateRootfsStorageHolding(rootfsState.manifest, pricing)
   $: rootfsSourceSizeMiB = !usingBaseRootfs && rootfsState.manifest?.rootfsSourceSizeBytes
     ? rootfsState.manifest.rootfsSourceSizeBytes / (1024 * 1024)
     : null
@@ -118,30 +107,11 @@
     : rootfsState.manifest?.bootstrapSummary?.trim() || null
   $: alephRecognizedBalance = balance ? Number(balance.balance) : null
   $: alephLockedAmount = balance ? Number(balance.locked_amount) : null
-  $: availableAleph = balance ? Math.max(0, Number(balance.balance) - Number(balance.locked_amount)) : null
-  $: selectedChainRecognizedBalance =
-    balance?.details && balance.details[form.paymentChain] != null ? Number(balance.details[form.paymentChain]) : null
   $: recognizedChainBalances = balance?.details
     ? Object.entries(balance.details)
         .filter(([, amount]) => Number(amount) > 0)
         .map(([chain, amount]) => `${chain}: ${formatNumber(Number(amount), 4)}`)
     : []
-  $: totalHoldRequirement =
-    form.paymentMode === 'hold' && validation.quote?.label === 'ALEPH held' && rootfsStorageHolding != null
-      ? validation.quote.required + rootfsStorageHolding
-      : null
-  $: computeHoldShortfall =
-    form.paymentMode === 'hold' && validation.quote?.label === 'ALEPH held' && availableAleph != null
-      ? Math.max(0, validation.quote.required - availableAleph)
-      : null
-  $: totalHoldShortfall =
-    form.paymentMode === 'hold' && totalHoldRequirement != null && availableAleph != null
-      ? Math.max(0, totalHoldRequirement - availableAleph)
-      : null
-  $: rootfsPinningShortfall =
-    form.paymentMode === 'hold' && rootfsStorageHolding != null && availableAleph != null
-      ? Math.max(0, rootfsStorageHolding - availableAleph)
-      : null
   $: validation = validateDeployment({
     form,
     manifest: rootfsState.manifest,
@@ -151,24 +121,17 @@
     crns,
     rootfsVerified
   })
-  $: availableTiers = pricing
-    ? form.paymentMode === 'hold'
-      ? holdSupportedTiers(pricing, HOLD_MAX_COMPUTE_UNITS)
-      : pricing.tiers
-    : []
+  $: availableTiers = pricing?.tiers ?? []
+  $: selectedCrnOption = form.selectedCrnHash ? crns.find((crn) => crn.hash === form.selectedCrnHash) ?? null : null
   $: if (sshPublicKeyStorageReady) persistSshPublicKey(form.sshPublicKey)
-  $: {
-    const currentWallet = wallet
-    const requestKey = currentWallet ? `${currentWallet.address}:${form.paymentChain}` : ''
-
-    if (!currentWallet) {
-      selectedChainBalanceRequestKey = ''
-      selectedChainWalletBalance = null
-      selectedChainWalletBalanceError = ''
-    } else if (requestKey !== selectedChainBalanceRequestKey) {
-      selectedChainBalanceRequestKey = requestKey
-      void refreshSelectedChainWalletBalance(currentWallet.address, form.paymentChain)
-    }
+  $: if (
+    selectedCrnOption &&
+    !crnLocationLabel(selectedCrnOption) &&
+    !selectedCrnOption.geo_source &&
+    !selectedCrnOption.resolved_ip &&
+    !crnGeoLookupInFlight[selectedCrnOption.hash]
+  ) {
+    void enrichSelectedCrn(selectedCrnOption)
   }
   $: {
     const currentWallet = wallet
@@ -234,6 +197,7 @@
           errors: [manifestResult.reason instanceof Error ? manifestResult.reason.message : String(manifestResult.reason)]
         }
       }
+      applyInitialRootfsSourceModePreference()
 
       if (pricingResult.status === 'fulfilled') {
         pricingState = pricingResult.value
@@ -243,6 +207,7 @@
 
       if (crnResult.status === 'fulfilled') {
         crns = crnResult.value
+        void enrichCurrentCrns(crnResult.value)
       } else {
         loadErrors.push(`CRNs: ${crnResult.reason instanceof Error ? crnResult.reason.message : String(crnResult.reason)}`)
       }
@@ -258,6 +223,7 @@
         }
       }
 
+      ensureValidRootfsSourceMode()
       selectCompatibleTier()
       selectDefaultCrn()
 
@@ -298,6 +264,53 @@
     }
   }
 
+  function preferredRootfsSourceMode(state: RootfsManifestState): DeploymentForm['rootfsSourceMode'] {
+    return state.valid && state.manifest ? 'custom' : 'base'
+  }
+
+  function applyInitialRootfsSourceModePreference() {
+    form = {
+      ...form,
+      rootfsSourceMode: preferredRootfsSourceMode(rootfsState)
+    }
+  }
+
+  function ensureValidRootfsSourceMode() {
+    if (form.rootfsSourceMode === 'custom' && !(rootfsState.valid && rootfsState.manifest)) {
+      form = {
+        ...form,
+        rootfsSourceMode: 'base'
+      }
+    }
+  }
+
+  async function enrichCurrentCrns(nextCrns: Crn[]) {
+    const requestKey = nextCrns.map((crn) => crn.hash).join(',')
+    const enriched = await enrichCrnsWithGeo(nextCrns)
+
+    if (crns.map((crn) => crn.hash).join(',') === requestKey) {
+      crns = enriched
+      selectDefaultCrn()
+    }
+  }
+
+  async function enrichSelectedCrn(crn: Crn) {
+    crnGeoLookupInFlight = {
+      ...crnGeoLookupInFlight,
+      [crn.hash]: true
+    }
+
+    try {
+      const [enriched] = await enrichCrnsWithGeo([crn])
+      crns = crns.map((item) => (item.hash === crn.hash ? enriched : item))
+    } finally {
+      crnGeoLookupInFlight = {
+        ...crnGeoLookupInFlight,
+        [crn.hash]: false
+      }
+    }
+  }
+
   function selectCompatibleTier() {
     if (!pricing) return
     const validIds = new Set(availableTiers.map((item) => item.id))
@@ -307,7 +320,6 @@
   }
 
   function selectDefaultCrn() {
-    if (form.paymentMode !== 'credit') return
     if (form.selectedCrnHash && crnOptions.some((crn) => crn.hash === form.selectedCrnHash)) return
     form = { ...form, selectedCrnHash: crnOptions[0]?.hash ?? '' }
   }
@@ -362,6 +374,7 @@
 
       if (crnResult.status === 'fulfilled') {
         crns = crnResult.value
+        void enrichCurrentCrns(crnResult.value)
       } else {
         refreshErrors.push(`CRNs: ${crnResult.reason instanceof Error ? crnResult.reason.message : String(crnResult.reason)}`)
       }
@@ -389,6 +402,7 @@
         }
       }
 
+      ensureValidRootfsSourceMode()
       selectCompatibleTier()
       selectDefaultCrn()
 
@@ -437,26 +451,11 @@
     }
   }
 
-  function setPaymentMode(mode: DeploymentForm['paymentMode']) {
-    form = {
-      ...form,
-      paymentMode: mode,
-      selectedCrnHash: mode === 'credit' ? form.selectedCrnHash || crnOptions[0]?.hash || '' : ''
-    }
-    selectCompatibleTier()
-    selectDefaultCrn()
-  }
-
   async function submitDeployment() {
     await runTask('Preparing deployment', async () => {
       if (!wallet) throw new Error('Connect MetaMask before deployment.')
       if (!pricing || !tier || (!usingBaseRootfs && !rootfsState.manifest)) throw new Error('Network data is incomplete.')
       if (!validation.ok) throw new Error(validation.errors.join(' '))
-
-      if (form.paymentMode === 'hold') {
-        statusText = `Switching to ${form.paymentChain}`
-        await switchPaymentChain(form.paymentChain)
-      }
 
       const selectedCrn = form.selectedCrnHash
         ? crns.find((crn) => crn.hash === form.selectedCrnHash) ?? null
@@ -515,7 +514,7 @@
         }
       }
 
-      if (deploymentResult.status === 'processed' && form.paymentMode === 'credit' && selectedCrn?.address) {
+      if (deploymentResult.status === 'processed' && selectedCrn?.address) {
         try {
           const feedbackMessage = await requestCrnStart(deploymentResult.itemHash, selectedCrn.address)
           feedbackMessages.push(feedbackMessage)
@@ -691,7 +690,7 @@
 
   function showSchedulerAllocationLink(instance: InstanceMessage) {
     const details = instanceDetails[instance.item_hash]
-    return details?.allocation?.source === 'scheduler' || instance.content?.payment?.type === 'hold'
+    return details?.allocation?.source === 'scheduler'
   }
 
   function instanceSshCommand(instance: InstanceMessage) {
@@ -713,10 +712,13 @@
   function orbitdbSetupTarget(instance: InstanceMessage) {
     if (rootfsState.manifest?.profile !== 'orbitdb-relay-pinner') return null
     if (instance.content?.rootfs?.parent?.ref !== rootfsState.manifest.rootfsItemHash) return null
-
-    const networking = instanceDetails[instance.item_hash]?.execution?.networking
+    const details = instanceDetails[instance.item_hash]
+    const networking = details?.execution?.networking
     const hostIpv4 = networking?.host_ipv4
+    const publicIpv6 = networking?.ipv6_ip || networking?.ipv6 || details?.allocation?.vmIpv6 || null
     const setupPort = networking?.mapped_ports?.['80']?.host
+    const metricsPort = networking?.mapped_ports?.['9090']?.host ?? null
+    const metricsHttpsPort = networking?.mapped_ports?.['9443']?.host ?? null
     const tcpPort = networking?.mapped_ports?.['9091']?.host
     const wsPort = networking?.mapped_ports?.['9092']?.host
 
@@ -724,9 +726,12 @@
 
     return {
       hostIpv4,
+      publicIpv6,
       setupPort,
       tcpPort,
       wsPort,
+      metricsPort,
+      metricsHttpsPort,
       webrtcPort: networking?.mapped_ports?.['9093']?.host ?? null,
       quicPort: networking?.mapped_ports?.['9094']?.host ?? null
     }
@@ -738,9 +743,12 @@
 
     return [
       target.hostIpv4,
+      target.publicIpv6 ?? '',
       target.setupPort,
       target.tcpPort,
       target.wsPort,
+      target.metricsPort ?? '',
+      target.metricsHttpsPort ?? '',
       target.webrtcPort ?? '',
       target.quicPort ?? ''
     ].join(':')
@@ -913,20 +921,6 @@
       return 'This deployment is confirmed on Aleph, but runtime allocation details are not available yet.'
     }
     return null
-  }
-
-  async function refreshSelectedChainWalletBalance(address: string, chain: DeploymentForm['paymentChain']) {
-    selectedChainWalletBalanceBusy = true
-    selectedChainWalletBalanceError = ''
-
-    try {
-      selectedChainWalletBalance = await fetchAlephTokenBalance(address, chain)
-    } catch (error) {
-      selectedChainWalletBalance = null
-      selectedChainWalletBalanceError = error instanceof Error ? error.message : String(error)
-    } finally {
-      selectedChainWalletBalanceBusy = false
-    }
   }
 
   function canDeleteInstance(instance: InstanceMessage) {
@@ -1134,11 +1128,7 @@
         {:else}
           <small>No supported-chain ALEPH balance reported yet.</small>
         {/if}
-        <p>Holding does not require a lock transaction. Aleph only counts ALEPH it recognizes on supported chains.</p>
-        <div class="balance-links">
-          <a href={ALEPH_HOLDING_DOCS_URL} target="_blank" rel="noreferrer">How Holding Works</a>
-          <a href={ALEPH_SUPPORTED_CHAINS_DOCS_URL} target="_blank" rel="noreferrer">Supported Chains</a>
-        </div>
+        <p>Deployments are credit-only right now. The connected wallet balance and Aleph credit balance are shown here for quick sanity checks.</p>
       </div>
 
       <button class="secondary-button" type="button" on:click={refresh} disabled={networkBusy} title="Refresh Aleph data">
@@ -1232,52 +1222,23 @@
           </label>
         {/if}
 
-        <fieldset>
-          <legend>Payment</legend>
-          <div class="segmented">
-            <button
-              type="button"
-              class:active={form.paymentMode === 'hold'}
-              on:click={() => setPaymentMode('hold')}
-            >
-              Hold
-            </button>
-            <button
-              type="button"
-              class:active={form.paymentMode === 'credit'}
-              on:click={() => setPaymentMode('credit')}
-            >
-              Credit
-            </button>
-          </div>
-        </fieldset>
-
-        {#if form.paymentMode === 'hold'}
-          <fieldset>
-            <legend>Chain</legend>
-            <div class="segmented chain-control">
-              {#each paymentChains as chain}
-                <button
-                  type="button"
-                  class:active={form.paymentChain === chain}
-                  on:click={() => (form = { ...form, paymentChain: chain })}
-                >
-                  {chain}
-                </button>
-              {/each}
-            </div>
-          </fieldset>
-        {:else}
-          <label>
-            <span>CRN</span>
-            <select bind:value={form.selectedCrnHash}>
-              <option value="">Select CRN</option>
-              {#each crnOptions as crn}
-                <option value={crn.hash}>{crnDisplayLabel(crn)}</option>
-              {/each}
-            </select>
-          </label>
-        {/if}
+        <label>
+          <span>CRN</span>
+          <select bind:value={form.selectedCrnHash}>
+            <option value="">Select CRN</option>
+            {#each crnOptions as crn}
+              <option value={crn.hash}>{crnDisplayLabel(crn)}</option>
+            {/each}
+          </select>
+          {#if selectedCrnOption}
+            <small>
+              {crnScoreLabel(selectedCrnOption) ? `Score ${crnScoreLabel(selectedCrnOption)} · ` : ''}
+              {selectedCrnOption.resolved_ip ? `${selectedCrnOption.resolved_ip} · ` : ''}
+              {crnLocationLabel(selectedCrnOption) ??
+                (crnGeoLookupInFlight[selectedCrnOption.hash] ? 'Looking up location...' : 'Location pending lookup')}
+            </small>
+          {/if}
+        </label>
 
         <label class="wide">
           <span>SSH public key</span>
@@ -1293,42 +1254,27 @@
       </div>
 
       <div class="quote-strip">
-        <div class:quote-ok={computeHoldShortfall === 0} class:quote-danger={computeHoldShortfall != null && computeHoldShortfall > 0}>
+        <div class:quote-ok={validation.quote != null} class:quote-danger={!validation.quote}>
           <span>Required for deployment</span>
           <strong>
             {validation.quote ? `${formatNumber(validation.quote.required, 4)} ${validation.quote.label}` : '-'}
           </strong>
-          {#if totalHoldRequirement != null}
-            <small>Total with rootfs pinning: {formatNumber(totalHoldRequirement, 4)} ALEPH held</small>
-          {/if}
-          {#if computeHoldShortfall != null}
-            <small class:status-ok={computeHoldShortfall === 0} class:status-danger={computeHoldShortfall > 0}>
-              {computeHoldShortfall > 0
-                ? `Short ${formatNumber(computeHoldShortfall, 4)} ALEPH for compute hold`
-                : 'Compute hold covered by current wallet'}
-            </small>
-          {/if}
+          <small>Charged from the connected wallet's Aleph credit balance.</small>
         </div>
-        <div class:quote-ok={rootfsPinningShortfall === 0} class:quote-danger={rootfsPinningShortfall != null && rootfsPinningShortfall > 0}>
-          <span>Rootfs pinning estimate</span>
+        <div>
+          <span>Credits available</span>
+          <strong>{balance ? formatNumber(balance.credit_balance, 0) : '-'}</strong>
+          <small>{wallet ? 'Refresh if you topped up credits in another session.' : 'Connect a wallet to load credits.'}</small>
+        </div>
+        <div>
+          <span>Rootfs source</span>
           <strong>
-            {usingBaseRootfs
-              ? 'Not required'
-              : rootfsStorageHolding != null
-                ? `${formatNumber(rootfsStorageHolding, 4)} ALEPH held`
-                : '-'}
+            {usingBaseRootfs ? selectedBaseRootfs.label : rootfsState.manifest?.version ?? 'Custom rootfs'}
           </strong>
           {#if usingBaseRootfs}
             <small>{selectedBaseRootfs.label} is managed by Aleph.</small>
           {:else if rootfsSourceSizeMiB != null}
             <small>{formatNumber(rootfsSourceSizeMiB, 2)} MiB uploaded image</small>
-          {/if}
-          {#if rootfsPinningShortfall != null}
-            <small class:status-ok={rootfsPinningShortfall === 0} class:status-danger={rootfsPinningShortfall > 0}>
-              {rootfsPinningShortfall > 0
-                ? `Short ${formatNumber(rootfsPinningShortfall, 4)} ALEPH for rootfs pinning`
-                : 'Rootfs pinning covered by current wallet'}
-            </small>
           {/if}
         </div>
         <div>
@@ -1338,41 +1284,13 @@
           </strong>
         </div>
         <div>
-          <span>{form.paymentChain} wallet balance</span>
+          <span>Selected CRN</span>
           <strong>
-            {selectedChainWalletBalance != null ? `${formatNumber(selectedChainWalletBalance, 4)} ALEPH` : selectedChainWalletBalanceBusy ? 'Loading...' : '-'}
+            {selectedCrnOption ? crnDisplayLabel(selectedCrnOption) : 'Select CRN'}
           </strong>
-          {#if selectedChainRecognizedBalance != null}
-            <small>Aleph recognizes {formatNumber(selectedChainRecognizedBalance, 4)} ALEPH on {form.paymentChain}</small>
-          {/if}
-          {#if selectedChainWalletBalance != null && selectedChainRecognizedBalance != null}
-            <small>
-              Difference: {formatNumber(Math.max(0, selectedChainWalletBalance - selectedChainRecognizedBalance), 4)} ALEPH
-            </small>
-          {/if}
-          {#if selectedChainWalletBalanceError}
-            <small class="status-danger">{selectedChainWalletBalanceError}</small>
-          {/if}
-        </div>
-        <div>
-          <span>Rootfs</span>
-          <strong>{usingBaseRootfs ? selectedBaseRootfs.label : rootfsState.manifest ? shortHash(rootfsState.manifest.rootfsItemHash) : '-'}</strong>
+          <small>{selectedCrnOption ? shortHash(selectedCrnOption.hash) : 'Compatible CRNs are filtered by the selected tier.'}</small>
         </div>
       </div>
-
-      {#if totalHoldShortfall != null}
-        <div class="hold-summary" class:hold-summary-danger={totalHoldShortfall > 0} class:hold-summary-ok={totalHoldShortfall === 0}>
-          <strong>
-            {totalHoldShortfall > 0
-              ? `Current hold configuration is short by ${formatNumber(totalHoldShortfall, 4)} ALEPH.`
-              : 'Current hold configuration is fully covered by the connected wallet.'}
-          </strong>
-          <span>
-            Available: {availableAleph != null ? formatNumber(availableAleph, 4) : '-'} ALEPH.
-            Required total: {formatNumber(totalHoldRequirement ?? 0, 4)} ALEPH.
-          </span>
-        </div>
-      {/if}
 
       {#if usingBaseRootfs}
         <div class="rootfs-panel">
