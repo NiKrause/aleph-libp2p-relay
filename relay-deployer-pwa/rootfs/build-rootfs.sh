@@ -272,6 +272,7 @@ EOF
   "requiredPortForwards": [
     { "port": 22, "tcp": true, "udp": false, "purpose": "SSH" },
     { "port": 80, "tcp": true, "udp": false, "purpose": "Temporary setup endpoint" },
+    { "port": 443, "tcp": true, "udp": false, "purpose": "Caddy HTTPS and WSS proxy" },
     { "port": 9095, "tcp": true, "udp": false, "purpose": "libp2p TCP" },
     { "port": 9096, "tcp": true, "udp": false, "purpose": "libp2p WSS" },
     { "port": 9097, "tcp": false, "udp": true, "purpose": "QUIC and WebTransport" },

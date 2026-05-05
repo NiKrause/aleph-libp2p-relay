@@ -1,0 +1,19 @@
+[Unit]
+Description=universal-connectivity rust-peer relay node
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/default/uc-rust-peer.ready
+
+[Service]
+Type=simple
+User=uc-rust-peer
+Group=uc-rust-peer
+WorkingDirectory=/opt/rust-peer
+EnvironmentFile=-/etc/default/uc-rust-peer
+ExecStart=/usr/local/sbin/uc-rust-peer-run.sh
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,19 @@
+[Unit]
+Description=universal-connectivity rust-peer websocket bridge
+After=uc-rust-peer.service
+Requires=uc-rust-peer.service
+ConditionPathExists=/etc/default/uc-rust-peer.ready
+
+[Service]
+Type=simple
+Environment=WS_BRIDGE_LISTEN_HOST=0.0.0.0
+Environment=WS_BRIDGE_LISTEN_PORT=9093
+Environment=WS_BRIDGE_TARGET_HOST=127.0.0.1
+Environment=WS_BRIDGE_TARGET_PORT=9092
+ExecStart=/usr/bin/python3 /usr/local/sbin/uc-rust-peer-ws-bridge.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

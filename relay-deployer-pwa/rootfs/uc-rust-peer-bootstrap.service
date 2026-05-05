@@ -1,0 +1,17 @@
+[Unit]
+Description=Temporary universal-connectivity rust-peer setup endpoint
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=!/etc/default/uc-rust-peer.ready
+
+[Service]
+Environment=ENV_FILE=/etc/default/uc-rust-peer
+Environment=READY_FILE=/etc/default/uc-rust-peer.ready
+ExecStart=/usr/bin/python3 /usr/local/sbin/uc-rust-peer-setup-server.py
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target

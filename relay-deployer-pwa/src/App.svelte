@@ -1029,7 +1029,7 @@
         setupPort,
         tcpPort,
         wsPort,
-        proxyUrl: null,
+        proxyUrl,
         metricsPort: null,
         metricsHttpsPort: null,
         webrtcPort: networking?.mapped_ports?.['9098']?.host ?? null,

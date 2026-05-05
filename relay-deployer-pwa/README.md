@@ -153,7 +153,9 @@ The `uc-go-peer` profile is simpler: it builds the upstream Go relay directly
 into the image without Docker, waits for Aleph’s mapped ports, and then writes
 explicit `LIBP2P_ANNOUNCE_ADDRS` values so the node advertises the real public
 TCP/WSS/QUIC/WebRTC endpoints. Its WSS transport stays on the mapped external
-WS port rather than going through the instance web proxy on `443`.
+WS port with native AutoTLS, and a follow-up refresh step can additionally wire
+the instance web proxy hostname to internal `443` through Caddy once the exact
+secure `libp2p.direct` hostname is known.
 
 That means the checked-in manifest for this profile must include `80/tcp` in
 `requiredPortForwards`, and you need to deploy the updated PWA together with a

@@ -324,8 +324,10 @@ prefer explicit multiaddrs when using the `443` WSS proxy path.
 ### `uc-go-peer`
 
 - Temporary setup endpoint: `80`
+- Public HTTPS/WSS proxy port: `443`
 - Relay TCP/WSS/QUIC/WebRTC ports: `9095`, `9096`, `9097`, `9098`
 - Service name: `uc-go-peer`
+- AutoTLS refresh service: `uc-go-peer-autotls-refresh`
 - Install directory: `/opt/go-peer`
 - Environment file: `/etc/default/uc-go-peer`
 - Data directory: `/var/lib/uc-go-peer`
@@ -339,10 +341,13 @@ host ports, and the configure helper writes `LIBP2P_ANNOUNCE_ADDRS` so the
 running Go relay announces the actual externally reachable TCP, WSS, QUIC,
 WebTransport, and WebRTC addresses.
 
-Unlike the OrbitDB and Rust proxy profiles, `uc-go-peer` keeps native WSS on
-its mapped `9096` host port. It does not currently remap websocket traffic
-through the instance web proxy on `443`; the announced WSS address therefore
-uses the assigned external WS host port instead.
+Unlike the OrbitDB profile, `uc-go-peer` keeps native AutoTLS-enabled WSS on
+its mapped `9096` host port. A post-start AutoTLS refresh step then reads the
+exact `libp2p.direct` hostname from the running service logs, replaces the
+wildcard placeholder announce entries with that concrete secure hostname, and,
+when a proxy hostname is available, also writes a Caddy config so the instance
+web proxy can expose an additional `443`-based `/dns4|/dns6/.../tls/ws` path in
+front of the native AutoTLS WSS backend.
 
 ## First-Boot Requirements
 
