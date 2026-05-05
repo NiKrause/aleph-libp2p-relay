@@ -33,6 +33,39 @@ pnpm build
 The output in `dist/` is fully static and can be served by any static host or
 published through IPFS/Aleph hosting.
 
+## Prepaid AA Deployments
+
+The PWA now includes an optional prepaid deployment gate for AA-wallet-style
+owners. This adds three pieces:
+
+- a deterministic deployment intent hash derived from the Aleph `INSTANCE`
+  payload before signing
+- an optional onchain prepaid vault flow for `approve`, `deposit`, `reserve`,
+  `consume`, and `refundExpired`
+- AA wallet assessment in the UI so the app can distinguish between a plain EOA
+  soft gate and a contract-backed owner address that may be compatible with hard
+  enforcement
+
+Enable the prepaid panel by setting:
+
+```bash
+VITE_PREPAID_VAULT_ADDRESS=0xYourVaultAddress
+VITE_PREPAID_RESERVATION_TTL_SECONDS=900
+```
+
+The checked-in Solidity scaffold lives at
+[contracts/PrepaidBudgetVault.sol](/Users/nandi/Projects/aleph-libp2p-relay/relay-deployer-pwa/contracts/PrepaidBudgetVault.sol).
+This repo does not currently include a Solidity build pipeline, so treat that
+contract as source to deploy with your preferred toolchain.
+
+Important limitation:
+
+- the PWA can gate signing on prepaid reservations
+- however, true hard enforcement still depends on Aleph accepting
+  contract-based/offchain signature verification for the owner address
+- if Aleph only honors classic EOA `personal_sign` in this publish path, the
+  prepaid model is a workflow gate rather than a cryptographically final stop
+
 ## Rootfs Sources
 
 The deploy form now defaults to `Custom rootfs` whenever
@@ -57,9 +90,31 @@ To build the alternative OrbitDB relay image instead of the default
 `py-libp2p` image:
 
 ```bash
+  cd relay-deployer-pwa
+  ROOTFS_PROFILE=orbitdb-relay-pinner \
+  ORBITDB_RELAY_PINNER_DIR=/Users/nandi/orbitdb-relay-pinner \
+  rootfs/build-rootfs.sh
+cp dist-rootfs/rootfs-manifest.json public/rootfs-manifest.json
+```
+
+To build the `universal-connectivity` Rust peer image instead:
+
+```bash
 cd relay-deployer-pwa
-ROOTFS_PROFILE=orbitdb-relay-pinner \
-ORBITDB_RELAY_PINNER_DIR=/Users/nandi/orbitdb-relay-pinner \
+export ALEPH_BIN=/Users/nandi/Projects/aleph-libp2p-relay/aleph-client/.venv/bin/aleph
+ROOTFS_PROFILE=uc-rust-peer \
+UNIVERSAL_CONNECTIVITY_DIR=/Users/nandi/Documents/projekte/DecentraSol/universal-connectivity \
+rootfs/build-rootfs.sh
+cp dist-rootfs/rootfs-manifest.json public/rootfs-manifest.json
+```
+
+To build the `universal-connectivity` Go peer image instead:
+
+```bash
+cd relay-deployer-pwa
+export ALEPH_BIN=/Users/nandi/Projects/aleph-libp2p-relay/aleph-client/.venv/bin/aleph
+ROOTFS_PROFILE=uc-go-peer \
+UNIVERSAL_CONNECTIVITY_DIR=/Users/nandi/Documents/projekte/DecentraSol/universal-connectivity \
 rootfs/build-rootfs.sh
 cp dist-rootfs/rootfs-manifest.json public/rootfs-manifest.json
 ```
@@ -67,24 +122,38 @@ cp dist-rootfs/rootfs-manifest.json public/rootfs-manifest.json
 That profile now builds a prebaked image by default. Node.js, production
 dependencies, and the `orbitdb-relay-pinner` wrapper are installed into the
 qcow2 during the build. The relay service is enabled, but held behind a ready
-file until the mapped Aleph host ports are known.
+file until the mapped Aleph host ports are known. Its generated rootfs manifest
+version now defaults to the upstream `orbitdb-relay-pinner/package.json`
+version unless you override `ROOTFS_VERSION`.
 
 On first boot the image starts a temporary HTTP setup endpoint on internal port
 `80`. The PWA automatically calls that endpoint after Aleph reports the mapped
-host ports for internal `80`, `9090`, `9091`, `9092`, `9093`, `9094`, and
-`9443`. The endpoint then runs
+host ports for internal `80`, `9090`, `9091`, `443`, `9093`, and `9094`. The
+endpoint then runs
 `/usr/local/sbin/orbitdb-relay-pinner-configure.sh`, writes
 `VITE_APPEND_ANNOUNCE` plus the external relay/metrics port mapping variables,
 creates `/etc/default/orbitdb-relay-pinner.ready`, starts
 `orbitdb-relay-pinner.service`, and shuts itself down.
 
-After the relay is up, the image now runs a second local one-shot step that
-waits for AutoTLS to provision the secure hostname/certificate, polls the local
-API until AutoTLS readiness is visible, derives the secure external
-`/tls/sni/.../ws` and `/dns4|/dns6/.../tls/ws` announces from the mapped Aleph
-WS port plus the AutoTLS hostname, appends those secure announces to
-`VITE_APPEND_ANNOUNCE`, updates the metrics HTTPS public host, and restarts the
-relay once so secure WSS announces persist across reboots.
+For the OrbitDB profile, the relay's internal WebSocket listener is back on
+`9092`, AutoTLS is disabled in the service environment, and the setup step can
+append secure `/dns4|/dns6/.../tls/ws` announces for the instance web proxy
+hostname so a local Caddy instance can terminate HTTPS/WSS on external `443`.
+Those `/tls/ws` multiaddrs now describe the public Caddy-terminated transport,
+not relay-side AutoTLS.
+
+The `uc-rust-peer` profile follows the same first-boot setup pattern. It starts
+the Rust relay only after Aleph reports the mapped ports, and it can expose a
+websocket bridge behind the instance web proxy on `443`. The current Rust peer
+still does not self-advertise remapped websocket addresses, so browser clients
+should continue to use explicit relay multiaddrs derived from the deployment
+metadata when relying on that `443` WSS path.
+
+The `uc-go-peer` profile is simpler: it builds the upstream Go relay directly
+into the image without Docker, waits for Aleph’s mapped ports, and then writes
+explicit `LIBP2P_ANNOUNCE_ADDRS` values so the node advertises the real public
+TCP/WSS/QUIC/WebRTC endpoints. Its WSS transport stays on the mapped external
+WS port rather than going through the instance web proxy on `443`.
 
 That means the checked-in manifest for this profile must include `80/tcp` in
 `requiredPortForwards`, and you need to deploy the updated PWA together with a
@@ -108,16 +177,10 @@ The setup endpoint then:
 - creates `/etc/default/orbitdb-relay-pinner.ready`
 - starts `orbitdb-relay-pinner.service`
 - shuts the temporary setup server down
-- starts `orbitdb-relay-pinner-autotls-refresh.service`
-
-That AutoTLS refresh step then:
-
-- waits for `/tls/ws` addresses on `http://127.0.0.1:9090/multiaddrs`
-- derives secure external AutoTLS announce addresses from the mapped WS port and SNI hostname
-- merges that secure external announce into `VITE_APPEND_ANNOUNCE`
-- writes `METRICS_HTTPS_PUBLIC_HOST` for `GET /health` and `GET /multiaddrs` URL hints
-- writes `/etc/default/orbitdb-relay-pinner.autotls-ready`
-- restarts `orbitdb-relay-pinner.service` once
+- when the instance web proxy hostname is known, appends secure
+  `/dns4|/dns6/.../tls/ws` announces for that hostname, writes
+  `/etc/caddy/Caddyfile`, and starts Caddy so the public HTTPS/WSS front door
+  is exposed on `443` and announced on standard proxy port `443`
 
 Important distinction:
 
@@ -127,7 +190,7 @@ Important distinction:
 
 For a fresh OrbitDB instance, the relay process is only considered started once
 `/etc/default/orbitdb-relay-pinner.ready` exists and `orbitdb-relay-pinner`
-listens on ports `9090`, `9091`, `9092`, `9093`, `9094`, and optionally `9443`.
+listens on ports `9090`, `9091`, `443`, `9093`, `9094`, and optionally `9443`.
 
 ## Port Mapping Notes
 
@@ -140,7 +203,7 @@ For the OrbitDB profile that means the PWA requests:
 - `80/TCP` temporary setup endpoint
 - `9090/TCP` metrics and health API
 - `9091/TCP` libp2p TCP
-- `9092/TCP` libp2p WebSocket
+- `443/TCP` libp2p WebSocket over TLS
 - `9093/UDP` WebRTC-direct
 - `9094/UDP` QUIC
 - `9443/TCP` metrics HTTPS
@@ -190,7 +253,7 @@ curl -v -X POST http://127.0.0.1/configure \
 ```bash
 ls -l /etc/default/orbitdb-relay-pinner.ready
 systemctl status orbitdb-relay-pinner orbitdb-relay-pinner-bootstrap --no-pager -l
-ss -ltnup | grep -E ':(9090|9091|9092|9093|9094|9443)\b' || true
+ss -ltnup | grep -E ':(443|9090|9091|9093|9094|9443)\b' || true
 ```
 
 Known caveat:

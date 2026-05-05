@@ -133,6 +133,34 @@ function parseCidFromPayload(payload: Record<string, unknown>): string | null {
   return null
 }
 
+function parseRejectionReason(payload: Record<string, unknown>): Pick<RootfsResolution, 'rejectionErrorCode' | 'rejectionReason'> {
+  const errorCode = typeof payload.error_code === 'number' ? payload.error_code : null
+  const details = payload.details && typeof payload.details === 'object' ? (payload.details as Record<string, unknown>) : null
+  const rawErrors = Array.isArray(details?.errors) ? details.errors : []
+  const firstError =
+    rawErrors[0] && typeof rawErrors[0] === 'object' ? (rawErrors[0] as Record<string, unknown>) : null
+
+  if (firstError) {
+    const accountBalance = Number(firstError.account_balance)
+    const requiredBalance = Number(firstError.required_balance)
+    if (Number.isFinite(accountBalance) && Number.isFinite(requiredBalance)) {
+      const shortfall = requiredBalance - accountBalance
+      return {
+        rejectionErrorCode: errorCode,
+        rejectionReason:
+          shortfall > 0
+            ? `Rejected by Aleph for insufficient hold balance: ${accountBalance.toFixed(3)} available, ${requiredBalance.toFixed(3)} required, ${shortfall.toFixed(3)} short.`
+            : `Rejected by Aleph for insufficient hold balance: ${accountBalance.toFixed(3)} available, ${requiredBalance.toFixed(3)} required.`
+      }
+    }
+  }
+
+  return {
+    rejectionErrorCode: errorCode,
+    rejectionReason: errorCode != null ? `Rejected by Aleph (error code ${errorCode}).` : null
+  }
+}
+
 async function probeGateway(cid: string, gatewayBaseUrl = IPFS_GATEWAY_BASE_URL): Promise<Pick<RootfsResolution, 'gatewayStatus' | 'gatewayError' | 'gatewayUrl'>> {
   const gatewayUrl = new URL(cid, gatewayBaseUrl).toString()
 
@@ -184,6 +212,9 @@ export async function resolveRootfsReference(
     payload.message && typeof payload.message === 'object' ? (payload.message as Record<string, unknown>) : null
 
   const cid = parseCidFromPayload(payload)
+  const rejection = normalizeStatus(payload.status) === 'rejected'
+    ? parseRejectionReason(payload)
+    : { rejectionErrorCode: null, rejectionReason: null }
   const gateway = cid
     ? await probeGateway(cid, gatewayBaseUrl)
     : { gatewayUrl: null, gatewayStatus: 'unknown' as const, gatewayError: null }
@@ -194,6 +225,8 @@ export async function resolveRootfsReference(
     messageType: String(payload.type || messageObject?.type || firstMessage?.type || '').toUpperCase() || null,
     cid,
     receptionTime: typeof payload.reception_time === 'string' ? payload.reception_time : null,
+    rejectionErrorCode: rejection.rejectionErrorCode,
+    rejectionReason: rejection.rejectionReason,
     gatewayUrl: gateway.gatewayUrl,
     gatewayStatus: gateway.gatewayStatus,
     gatewayError: gateway.gatewayError

@@ -10,15 +10,19 @@ builds or uploads the image itself.
 
 ## Profiles
 
-The builder supports two rootfs profiles:
+The builder supports four rootfs profiles:
 
 - `py-libp2p` (default): copies the local `py-libp2p` tree and enables `py-libp2p-relay.service`.
 - `orbitdb-relay-pinner`: copies a minimal local `orbitdb-relay-pinner` payload and enables `orbitdb-relay-pinner.service` using the upstream `deploy/` files from that repo.
+- `uc-go-peer`: copies `go-peer/` from a local `universal-connectivity` checkout, builds the Go relay binary into the image, and enables `uc-go-peer.service`.
+- `uc-rust-peer`: copies `rust-peer/` from a local `universal-connectivity` checkout, compiles the Rust peer into the image, and enables `uc-rust-peer.service` plus a local websocket bridge.
 
 By default the builder now uses profile-specific install modes:
 
 - `py-libp2p`: `thin`
 - `orbitdb-relay-pinner`: `prebaked`
+- `uc-go-peer`: `prebaked`
+- `uc-rust-peer`: `prebaked`
 
 `thin` uploads less data to Aleph, but the VM installs runtime packages and
 application dependencies on first boot before the relay service becomes
@@ -60,8 +64,29 @@ ORBITDB_RELAY_PINNER_DIR=/Users/nandi/orbitdb-relay-pinner \
 rootfs/build-rootfs.sh
 ```
 
+To build the universal-connectivity Rust peer image from a local checkout:
+
+```bash
+cd relay-deployer-pwa
+ROOTFS_PROFILE=uc-rust-peer \
+UNIVERSAL_CONNECTIVITY_DIR=/Users/nandi/Documents/projekte/DecentraSol/universal-connectivity \
+rootfs/build-rootfs.sh
+```
+
+To build the universal-connectivity Go peer image from a local checkout:
+
+```bash
+cd relay-deployer-pwa
+ROOTFS_PROFILE=uc-go-peer \
+UNIVERSAL_CONNECTIVITY_DIR=/Users/nandi/Documents/projekte/DecentraSol/universal-connectivity \
+rootfs/build-rootfs.sh
+```
+
 The generated qcow2 filename and the manifest `version` default both change with
-`ROOTFS_PROFILE`.
+`ROOTFS_PROFILE`. For `orbitdb-relay-pinner`, the script derives the default
+manifest version from `${ORBITDB_RELAY_PINNER_DIR}/package.json` when that file
+is available, and falls back to the built-in default if it cannot read it. Set
+`ROOTFS_VERSION=...` to override either behavior explicitly.
 
 ## macOS Notes
 
@@ -84,6 +109,28 @@ cd relay-deployer-pwa
 export ALEPH_BIN=/Users/nandi/Projects/aleph-libp2p-relay/aleph-client/.venv/bin/aleph
 ROOTFS_PROFILE=orbitdb-relay-pinner \
 ORBITDB_RELAY_PINNER_DIR=/Users/nandi/orbitdb-relay-pinner \
+rootfs/build-rootfs.sh
+```
+
+For the Rust peer profile, mount the full `universal-connectivity` checkout so
+the Docker builder can read `rust-peer/`:
+
+```bash
+cd relay-deployer-pwa
+export ALEPH_BIN=/Users/nandi/Projects/aleph-libp2p-relay/aleph-client/.venv/bin/aleph
+ROOTFS_PROFILE=uc-rust-peer \
+UNIVERSAL_CONNECTIVITY_DIR=/Users/nandi/Documents/projekte/DecentraSol/universal-connectivity \
+rootfs/build-rootfs.sh
+```
+
+For the Go peer profile, point at the same checkout and the builder will use
+`go-peer/` directly without relying on the upstream Dockerfile:
+
+```bash
+cd relay-deployer-pwa
+export ALEPH_BIN=/Users/nandi/Projects/aleph-libp2p-relay/aleph-client/.venv/bin/aleph
+ROOTFS_PROFILE=uc-go-peer \
+UNIVERSAL_CONNECTIVITY_DIR=/Users/nandi/Documents/projekte/DecentraSol/universal-connectivity \
 rootfs/build-rootfs.sh
 ```
 
@@ -132,23 +179,22 @@ pnpm build
 ### `orbitdb-relay-pinner`
 
 - Metrics/health port: `9090`
-- Metrics HTTPS port: `9443`
 - Temporary setup endpoint: `80`
+- Public HTTPS/WSS proxy port: `443`
 - Relay TCP/WS/WebRTC/QUIC ports: `9091`, `9092`, `9093`, `9094`
 - Service name: `orbitdb-relay-pinner`
 - Install directory: `/opt/orbitdb-relay-pinner`
 - Environment file: `/etc/default/orbitdb-relay-pinner`
 - Data directory: `/var/lib/orbitdb-relay-pinner`
 - Configure helper: `/usr/local/sbin/orbitdb-relay-pinner-configure.sh`
-- AutoTLS refresh helper: `/usr/local/sbin/orbitdb-relay-pinner-autotls-refresh.py`
 - Setup endpoint service: `orbitdb-relay-pinner-bootstrap.service`
 - Ready file: `/etc/default/orbitdb-relay-pinner.ready`
-- AutoTLS ready file: `/etc/default/orbitdb-relay-pinner.autotls-ready`
 
 The OrbitDB profile copies the upstream `deploy/orbitdb-relay-pinner.service`
 and `deploy/orbitdb-relay-pinner.env.example` from the source checkout into the
-image, installs Node.js 22 and production dependencies during the image build,
-and leaves the service enabled but gated by `/etc/default/orbitdb-relay-pinner.ready`.
+image, installs Node.js 22, Caddy, and production dependencies during the
+image build, and leaves the relay service enabled but gated by
+`/etc/default/orbitdb-relay-pinner.ready`.
 It does not try to guess the final public IP or host-mapped Aleph ports inside
 the rootfs build.
 
@@ -163,8 +209,8 @@ That endpoint runs:
   [--public-ipv6 PUBLIC_IPV6] \
   --tcp-port HOST_TCP_PORT \
   --ws-port HOST_WS_PORT \
+  [--proxy-hostname PROXY_HOSTNAME] \
   [--metrics-port HOST_METRICS_PORT] \
-  [--metrics-https-port HOST_METRICS_HTTPS_PORT] \
   --webrtc-port HOST_WEBRTC_PORT \
   --quic-port HOST_QUIC_PORT
 ```
@@ -172,49 +218,39 @@ That endpoint runs:
 After a successful configure call it writes `VITE_APPEND_ANNOUNCE`, creates the
 ready file, persists external relay/metrics host port mapping values in
 `/etc/default/orbitdb-relay-pinner`, starts the relay with the prebaked runtime,
-and shuts the temporary HTTP endpoint down.
-
-After that first start, a second local systemd step waits for AutoTLS to obtain
-the secure hostname/certificate, polls the local metrics API until AutoTLS
-exposes both a serving zone and secure `/tls/ws` readiness, derives the secure
-external WebSocket announce using the Aleph-mapped external WS port together
-with the AutoTLS SNI hostname, appends secure `/ip4|/ip6 ... /tls/sni/.../ws`
-and `/dns4|/dns6 ... /tls/ws` announce variants to `VITE_APPEND_ANNOUNCE`,
-writes `METRICS_HTTPS_PUBLIC_HOST`, writes
-`/etc/default/orbitdb-relay-pinner.autotls-ready`, and restarts
-`orbitdb-relay-pinner.service` once so the secure WSS announce set survives
-reboots.
+and shuts the temporary HTTP endpoint down. When a proxy hostname is passed in,
+the configure step appends secure `/dns4/.../tls/ws` and `/dns6/.../tls/ws`
+multiaddrs for that hostname, writes `/etc/caddy/Caddyfile`, and starts a local
+Caddy instance to terminate HTTPS/WSS in front of the relay's internal `9092`
+WebSocket listener. The secure
+`/tls/ws` suffix is still intentional here: it describes the externally
+reachable transport exposed by Caddy, even though relay-side AutoTLS is
+disabled.
 
 ### Operational Notes
 
 - `orbitdb-relay-pinner.service` is gated by
   `/etc/default/orbitdb-relay-pinner.ready`
 - `orbitdb-relay-pinner-bootstrap.service` is only the temporary setup server
-- `orbitdb-relay-pinner-autotls-refresh.service` is the one-shot post-configure
-  watcher for secure external AutoTLS `/tls/sni/.../ws` announce addresses
+- `caddy.service` is gated by `/etc/default/orbitdb-relay-pinner.caddy-ready`
 - if the bootstrap service is active and the relay service is skipped because of
   `ConditionPathExists=/etc/default/orbitdb-relay-pinner.ready`, the relay has
   not been configured yet
-- if `/etc/default/orbitdb-relay-pinner.ready` exists but
-  `/etc/default/orbitdb-relay-pinner.autotls-ready` does not, the relay has
-  started with plain mapped announces but has not yet persisted the secure
-  AutoTLS external WS announce address derived from the mapped Aleph port
 
 Expected listening ports after a successful configure step:
 
 - `9090/TCP` metrics and health API
 - `9091/TCP` relay TCP
-- `9092/TCP` relay WebSocket
+- `9092/TCP` relay WebSocket backend for the local HTTPS proxy
+- `443/TCP` local HTTPS/WSS proxy
 - `9093/UDP` WebRTC-direct
 - `9094/UDP` QUIC
-- `9443/TCP` metrics HTTPS
 
 To verify the live VM after configure:
 
 ```bash
-systemctl status orbitdb-relay-pinner orbitdb-relay-pinner-bootstrap --no-pager -l
-systemctl status orbitdb-relay-pinner-autotls-refresh --no-pager -l
-ss -ltnup | grep -E ':(9090|9091|9092|9093|9094|9443)\b' || true
+systemctl status orbitdb-relay-pinner orbitdb-relay-pinner-bootstrap caddy --no-pager -l
+ss -ltnup | grep -E ':(443|9090|9091|9092|9093|9094)\b' || true
 ```
 
 Logs go to `journald`, not to a dedicated file:
@@ -230,27 +266,83 @@ the setup server locally from inside the VM:
 curl -v http://127.0.0.1/health
 curl -v -X POST http://127.0.0.1/configure \
   -H 'content-type: application/json' \
-  --data '{"public_ipv4":"PUBLIC_IP","public_ipv6":"PUBLIC_IPV6","tcp_port":TCP_PORT,"ws_port":WS_PORT,"metrics_port":METRICS_PORT,"metrics_https_port":METRICS_HTTPS_PORT,"webrtc_port":WEBRTC_PORT,"quic_port":QUIC_PORT}'
+  --data '{"public_ipv4":"PUBLIC_IP","public_ipv6":"PUBLIC_IPV6","tcp_port":TCP_PORT,"ws_port":WS_PORT,"proxy_url":"https://PROXY_HOSTNAME","metrics_port":METRICS_PORT,"webrtc_port":WEBRTC_PORT,"quic_port":QUIC_PORT}'
 ```
 
 That local success proves the image build and configure helper are working even
 if browser-to-CRN reachability for the temporary external setup port is not.
-Once configured, you can then watch for `/tls/ws` on the local relay API and
-verify the persisted external secure announce:
+Once configured, you can verify the persisted external secure announce entries:
 
 ```bash
 curl -sS http://127.0.0.1:9090/multiaddrs
-journalctl -u orbitdb-relay-pinner-autotls-refresh -n 100 --no-pager
-grep '^AUTOTLS_SERVING_ZONE=' /etc/default/orbitdb-relay-pinner
 grep '^VITE_APPEND_ANNOUNCE=' /etc/default/orbitdb-relay-pinner
+sed -n '1,160p' /etc/caddy/Caddyfile
 ```
 
-The persisted secure WebSocket announce uses the mapped external WS port, for example:
+The persisted secure WebSocket announce uses the configured proxy hostname and
+Aleph's standard HTTPS proxy port `443`. These secure multiaddrs point at the
+Caddy front door, not at relay-side AutoTLS, for example:
 
 ```text
-/ip4/PUBLIC_IP/tcp/EXTERNAL_WS_PORT/tls/sni/IP_BASED_AUTOTLS_DOMAIN/ws
-/dns4/IP_BASED_AUTOTLS_DOMAIN/tcp/EXTERNAL_WS_PORT/tls/ws
+/dns4/PROXY_HOSTNAME/tcp/443/tls/ws
+/dns6/PROXY_HOSTNAME/tcp/443/tls/ws
 ```
+
+### `uc-rust-peer`
+
+- Temporary setup endpoint: `80`
+- Public HTTPS/WSS proxy port: `443`
+- Relay TCP/WebSocket/WebRTC/QUIC ports: `9092`, `9093`, `9090`, `9091`
+- Service names: `uc-rust-peer`, `uc-rust-peer-ws-bridge`
+- Install directory: `/opt/rust-peer`
+- Environment file: `/etc/default/uc-rust-peer`
+- Data directory: `/var/lib/uc-rust-peer`
+- Configure helper: `/usr/local/sbin/uc-rust-peer-configure.sh`
+- Setup endpoint service: `uc-rust-peer-bootstrap.service`
+- Ready file: `/etc/default/uc-rust-peer.ready`
+
+This profile uses the same first-boot configure pattern as OrbitDB. The image
+boots a temporary HTTP setup endpoint on internal `80`, the PWA posts the
+mapped Aleph host ports, and the configure helper starts the real services only
+after those mappings are known.
+
+After configure:
+
+- `uc-rust-peer.service` runs the upstream `rust-peer` in `--headless`
+  relay-server mode
+- `uc-rust-peer-ws-bridge.service` accepts websocket connections on internal
+  `9093` and forwards the byte stream to the Rust peer TCP listener on `9092`
+- when a proxy hostname is available, Caddy terminates HTTPS/WSS on `443` and
+  forwards to that local websocket bridge
+
+Important caveat: the current upstream `rust-peer` codebase still does not
+natively advertise host-remapped websocket multiaddrs. This image therefore
+stores the computed external websocket addresses in `RUST_PEER_ANNOUNCE_HINTS`
+for operators and browser clients, and browser-side relay configuration should
+prefer explicit multiaddrs when using the `443` WSS proxy path.
+
+### `uc-go-peer`
+
+- Temporary setup endpoint: `80`
+- Relay TCP/WSS/QUIC/WebRTC ports: `9095`, `9096`, `9097`, `9098`
+- Service name: `uc-go-peer`
+- Install directory: `/opt/go-peer`
+- Environment file: `/etc/default/uc-go-peer`
+- Data directory: `/var/lib/uc-go-peer`
+- Configure helper: `/usr/local/sbin/uc-go-peer-configure.sh`
+- Setup endpoint service: `uc-go-peer-bootstrap.service`
+- Ready file: `/etc/default/uc-go-peer.ready`
+
+This profile also uses the first-boot configure pattern. The image starts a
+temporary HTTP setup endpoint on internal `80`, the PWA posts the mapped Aleph
+host ports, and the configure helper writes `LIBP2P_ANNOUNCE_ADDRS` so the
+running Go relay announces the actual externally reachable TCP, WSS, QUIC,
+WebTransport, and WebRTC addresses.
+
+Unlike the OrbitDB and Rust proxy profiles, `uc-go-peer` keeps native WSS on
+its mapped `9096` host port. It does not currently remap websocket traffic
+through the instance web proxy on `443`; the announced WSS address therefore
+uses the assigned external WS host port instead.
 
 ## First-Boot Requirements
 

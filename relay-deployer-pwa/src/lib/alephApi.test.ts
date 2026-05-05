@@ -91,6 +91,18 @@ describe('Aleph API client', () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
+            instance_hash: 'a'.repeat(64),
+            subdomain: 'dragon-belt-friend-share',
+            url: 'dragon-belt-friend-share.2n6.me',
+            ipv6: '2a0e:97c0:3e3:54b:3:4202:9d73:e291',
+            active: true
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
             ['a'.repeat(64)]: {
               networking: {
                 host_ipv4: '149.86.227.106',
@@ -135,9 +147,11 @@ describe('Aleph API client', () => {
       allocation: {
         crnUrl: 'https://selected-crn.example'
       },
+      webAccessUrl: 'https://dragon-belt-friend-share.2n6.me',
       execution: {
         networking: {
           host_ipv4: '149.86.227.106',
+          proxy_url: 'https://dragon-belt-friend-share.2n6.me',
           mapped_ports: {
             '22': {
               host: 24008
@@ -285,6 +299,18 @@ describe('Aleph API client', () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
+            instance_hash: 'a'.repeat(64),
+            subdomain: 'dragon-belt-friend-share',
+            url: 'dragon-belt-friend-share.2n6.me',
+            ipv6: '2a0e:97c0:3e3:54b:3:4202:9d73:e291',
+            active: true
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
             [Array(65).join('a')]: {
               networking: {
                 ipv4_network: '172.16.7.0/24',
@@ -299,6 +325,9 @@ describe('Aleph API client', () => {
                     udp: false
                   }
                 }
+              },
+              web_access: {
+                url: 'dragon-belt-friend-share.2n6.me'
               },
               status: {
                 started_at: '2026-04-21T10:01:00Z'
@@ -333,6 +362,7 @@ describe('Aleph API client', () => {
         crnUrl: 'https://dv1ca.deepvalley.cloud',
         vmIpv6: '2a02:c207:1:2178::2'
       },
+      webAccessUrl: 'https://dragon-belt-friend-share.2n6.me',
       executionLookupBlocked: false,
       execution: {
         crnUrl: 'https://dv1ca.deepvalley.cloud',
@@ -340,7 +370,8 @@ describe('Aleph API client', () => {
         running: true,
         networking: {
           host_ipv4: '167.86.74.178',
-          ipv6_ip: '2a02:c207:1:2178::3'
+          ipv6_ip: '2a02:c207:1:2178::3',
+          proxy_url: 'https://dragon-belt-friend-share.2n6.me'
         }
       }
     })
@@ -349,6 +380,19 @@ describe('Aleph API client', () => {
   it('loads manual CRN runtime details for a credit instance without hitting the scheduler', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response('', { status: 404 })
+    )
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          instance_hash: 'b'.repeat(64),
+          subdomain: 'dragon-belt-friend-share',
+          url: 'dragon-belt-friend-share.2n6.me',
+          ipv6: '2001:db8::10',
+          active: true
+        }),
+        { status: 200 }
+      )
     )
 
     fetchMock.mockResolvedValueOnce(
@@ -406,9 +450,10 @@ describe('Aleph API client', () => {
       ]
     )
 
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(4)
     expect(String(fetchMock.mock.calls[0][0])).toContain('https://scheduler.api.aleph.cloud/api/v0/allocation/')
-    expect(String(fetchMock.mock.calls[1][0])).toContain('https://selected-crn.example/v2/about/executions/list')
+    expect(String(fetchMock.mock.calls[1][0])).toContain('https://api.2n6.me/api/hash/')
+    expect(String(fetchMock.mock.calls[2][0])).toContain('https://selected-crn.example/v2/about/executions/list')
     expect(details['b'.repeat(64)]).toMatchObject({
       messageStatus: 'processed',
       allocation: {
@@ -416,6 +461,7 @@ describe('Aleph API client', () => {
         crnHash: 'c'.repeat(64),
         crnUrl: 'https://selected-crn.example'
       },
+      webAccessUrl: 'https://dragon-belt-friend-share.2n6.me',
       execution: {
         version: 'v1',
         networking: {
@@ -430,6 +476,18 @@ describe('Aleph API client', () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response('', { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            instance_hash: 'd'.repeat(64),
+            subdomain: 'dragon-belt-friend-share',
+            url: 'dragon-belt-friend-share.2n6.me',
+            ipv6: '2001:db8::10',
+            active: true
+          }),
+          { status: 200 }
+        )
+      )
       .mockRejectedValueOnce(new TypeError('Failed to fetch'))
 
     const details = await fetchInstanceRuntimeDetails(
@@ -459,9 +517,10 @@ describe('Aleph API client', () => {
       ]
     )
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(String(fetchMock.mock.calls[0][0])).toContain('https://scheduler.api.aleph.cloud/api/v0/allocation/')
-    expect(String(fetchMock.mock.calls[1][0])).toContain('https://selected-crn.example/v2/about/executions/list')
+    expect(String(fetchMock.mock.calls[1][0])).toContain('https://api.2n6.me/api/hash/')
+    expect(String(fetchMock.mock.calls[2][0])).toContain('https://selected-crn.example/v2/about/executions/list')
     expect(details['d'.repeat(64)]).toMatchObject({
       messageStatus: 'processed',
       allocation: {
@@ -469,6 +528,7 @@ describe('Aleph API client', () => {
         crnHash: 'e'.repeat(64),
         crnUrl: 'https://selected-crn.example'
       },
+      webAccessUrl: 'https://dragon-belt-friend-share.2n6.me',
       executionLookupBlocked: true,
       execution: null,
       error: null
@@ -486,6 +546,18 @@ describe('Aleph API client', () => {
               node_id: 'scheduler-crn',
               url: 'https://scheduled-crn.example'
             }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            instance_hash: 'f'.repeat(64),
+            subdomain: 'dragon-belt-friend-share',
+            url: 'dragon-belt-friend-share.2n6.me',
+            ipv6: '2001:db8::42',
+            active: true
           }),
           { status: 200 }
         )
@@ -524,6 +596,7 @@ describe('Aleph API client', () => {
       source: 'scheduler',
       crnUrl: 'https://scheduled-crn.example'
     })
+    expect(details['f'.repeat(64)]?.webAccessUrl).toBe('https://dragon-belt-friend-share.2n6.me')
   })
 
   it('treats browser-blocked allocation notify requests as unconfirmed rather than failed', async () => {
@@ -572,6 +645,7 @@ describe('Aleph API client', () => {
         setupPort: 28080,
         tcpPort: 28191,
         wsPort: 28192,
+        proxyUrl: 'https://dragon-belt-friend-share.2n6.me',
         metricsPort: 28190,
         metricsHttpsPort: 29443,
         webrtcPort: 28193,
@@ -591,6 +665,7 @@ describe('Aleph API client', () => {
       public_ipv6: '2a01:4f8:c010:4b5::42',
       tcp_port: 28191,
       ws_port: 28192,
+      proxy_url: 'https://dragon-belt-friend-share.2n6.me',
       metrics_port: 28190,
       metrics_https_port: 29443,
       webrtc_port: 28193,

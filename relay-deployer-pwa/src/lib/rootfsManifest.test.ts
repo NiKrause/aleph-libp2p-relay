@@ -128,9 +128,48 @@ describe('validateRootfsManifest', () => {
       messageType: 'STORE',
       cid: 'QmExampleCid',
       receptionTime: '2026-04-16T13:28:47.044481Z',
+      rejectionErrorCode: null,
+      rejectionReason: null,
       gatewayUrl: 'https://ipfs.aleph.cloud/ipfs/QmExampleCid',
       gatewayStatus: 'reachable',
       gatewayError: null
     })
+  })
+
+  it('surfaces Aleph rejection details for rejected store messages', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: 'rejected',
+          error_code: 5,
+          details: {
+            errors: [
+              {
+                account_balance: '2084.447358385644',
+                required_balance: '2257.863908099293478965'
+              }
+            ]
+          },
+          messages: [
+            {
+              type: 'STORE',
+              content: {
+                item_hash: 'QmExampleCid'
+              }
+            }
+          ]
+        }),
+        { status: 200 }
+      )
+    )
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 200 }))
+
+    const result = await resolveRootfsReference('f'.repeat(64))
+
+    expect(result?.rejectionErrorCode).toBe(5)
+    expect(result?.rejectionReason).toContain('Rejected by Aleph for insufficient hold balance')
+    expect(result?.rejectionReason).toContain('2084.447 available')
+    expect(result?.rejectionReason).toContain('2257.864 required')
   })
 })

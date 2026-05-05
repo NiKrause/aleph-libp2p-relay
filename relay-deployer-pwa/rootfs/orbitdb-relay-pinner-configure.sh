@@ -5,11 +5,17 @@ ENV_FILE="${ENV_FILE:-/etc/default/orbitdb-relay-pinner}"
 READY_FILE="${READY_FILE:-/etc/default/orbitdb-relay-pinner.ready}"
 AUTOTLS_READY_FILE="${AUTOTLS_READY_FILE:-/etc/default/orbitdb-relay-pinner.autotls-ready}"
 SERVICE_NAME="${SERVICE_NAME:-orbitdb-relay-pinner.service}"
-AUTOTLS_REFRESH_SERVICE="${AUTOTLS_REFRESH_SERVICE:-orbitdb-relay-pinner-autotls-refresh.service}"
+CADDY_SERVICE="${CADDY_SERVICE:-caddy.service}"
+CADDY_READY_FILE="${CADDY_READY_FILE:-/etc/default/orbitdb-relay-pinner.caddy-ready}"
+CADDYFILE="${CADDYFILE:-/etc/caddy/Caddyfile}"
+CADDY_UPSTREAM_HOST="${CADDY_UPSTREAM_HOST:-127.0.0.1}"
+CADDY_UPSTREAM_WS_PORT="${CADDY_UPSTREAM_WS_PORT:-9092}"
+CADDY_UPSTREAM_METRICS_PORT="${CADDY_UPSTREAM_METRICS_PORT:-9090}"
 PUBLIC_IPV4=""
 PUBLIC_IPV6=""
 TCP_PORT=""
 WS_PORT=""
+PROXY_HOSTNAME=""
 METRICS_PORT=""
 METRICS_HTTPS_PORT=""
 WEBRTC_PORT=""
@@ -24,6 +30,7 @@ Usage:
     [--public-ipv6 <ipv6>] \
     --tcp-port <host-port> \
     --ws-port <host-port> \
+    [--proxy-hostname <hostname>] \
     [--metrics-port <host-port>] \
     [--metrics-https-port <host-port>] \
     [--webrtc-port <host-port>] \
@@ -31,7 +38,7 @@ Usage:
     [--no-start]
 
 Writes VITE_APPEND_ANNOUNCE for the externally assigned Aleph host ports,
-marks the relay as ready, and optionally starts the systemd service.
+marks the relay as ready, and optionally starts the relay plus Caddy services.
 EOF
 }
 
@@ -44,6 +51,24 @@ write_env_var() {
   else
     printf '%s=%s\n' "${key}" "${value}" >> "${ENV_FILE}"
   fi
+}
+
+write_caddyfile() {
+  local hostname="$1"
+  mkdir -p "$(dirname "${CADDYFILE}")"
+  cat > "${CADDYFILE}" <<EOF
+${hostname} {
+  handle /health {
+    reverse_proxy 127.0.0.1:${CADDY_UPSTREAM_METRICS_PORT}
+  }
+
+  handle /multiaddrs {
+    reverse_proxy 127.0.0.1:${CADDY_UPSTREAM_METRICS_PORT}
+  }
+
+  reverse_proxy ${CADDY_UPSTREAM_HOST}:${CADDY_UPSTREAM_WS_PORT}
+}
+EOF
 }
 
 while [ "$#" -gt 0 ]; do
@@ -62,6 +87,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --ws-port)
       WS_PORT="${2:-}"
+      shift 2
+      ;;
+    --proxy-hostname)
+      PROXY_HOSTNAME="${2:-}"
       shift 2
       ;;
     --metrics-port)
@@ -106,14 +135,22 @@ rm -f "${AUTOTLS_READY_FILE}"
 
 announce=(
   "/ip4/${PUBLIC_IPV4}/tcp/${TCP_PORT}"
-  "/ip4/${PUBLIC_IPV4}/tcp/${WS_PORT}/ws"
 )
 
 if [ -n "${PUBLIC_IPV6}" ]; then
   announce+=(
     "/ip6/${PUBLIC_IPV6}/tcp/${TCP_PORT}"
-    "/ip6/${PUBLIC_IPV6}/tcp/${WS_PORT}/ws"
   )
+fi
+
+if [ -n "${PROXY_HOSTNAME}" ]; then
+  announce+=("/dns4/${PROXY_HOSTNAME}/tcp/443/tls/ws")
+  announce+=("/dns6/${PROXY_HOSTNAME}/tcp/443/tls/ws")
+else
+  announce+=("/ip4/${PUBLIC_IPV4}/tcp/${WS_PORT}/ws")
+  if [ -n "${PUBLIC_IPV6}" ]; then
+    announce+=("/ip6/${PUBLIC_IPV6}/tcp/${WS_PORT}/ws")
+  fi
 fi
 
 if [ -n "${WEBRTC_PORT}" ]; then
@@ -138,6 +175,9 @@ if [ -n "${PUBLIC_IPV6}" ]; then
 fi
 write_env_var "EXTERNAL_RELAY_TCP_PORT" "${TCP_PORT}"
 write_env_var "EXTERNAL_RELAY_WS_PORT" "${WS_PORT}"
+if [ -n "${PROXY_HOSTNAME}" ]; then
+  write_env_var "PROXY_HOSTNAME" "${PROXY_HOSTNAME}"
+fi
 if [ -n "${METRICS_PORT}" ]; then
   write_env_var "EXTERNAL_METRICS_PORT" "${METRICS_PORT}"
 fi
@@ -156,7 +196,15 @@ if [ "${START_SERVICE}" -eq 1 ]; then
   systemctl daemon-reload
   systemctl enable "${SERVICE_NAME}"
   systemctl restart "${SERVICE_NAME}"
-  systemctl start "${AUTOTLS_REFRESH_SERVICE}"
+  if [ -n "${PROXY_HOSTNAME}" ]; then
+    write_caddyfile "${PROXY_HOSTNAME}"
+    touch "${CADDY_READY_FILE}"
+    systemctl enable "${CADDY_SERVICE}"
+    systemctl restart "${CADDY_SERVICE}"
+  else
+    rm -f "${CADDY_READY_FILE}"
+    systemctl stop "${CADDY_SERVICE}" || true
+  fi
 fi
 
 printf 'Configured VITE_APPEND_ANNOUNCE=%s\n' "${announce_value}"

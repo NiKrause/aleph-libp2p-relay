@@ -52,7 +52,27 @@ type CrnExecutionV2Payload = {
     ipv6_network?: unknown
     ipv6_ip?: unknown
     ipv4_ip?: unknown
+    proxy_url?: unknown
+    proxyUrl?: unknown
+    web_access_url?: unknown
+    webAccessUrl?: unknown
+    proxy_hostname?: unknown
+    proxyHostname?: unknown
+    domain?: unknown
+    hostname?: unknown
     mapped_ports?: Record<string, { host?: unknown; tcp?: unknown; udp?: unknown }> | null
+  } | null
+  web_access?: {
+    url?: unknown
+    proxy_url?: unknown
+    hostname?: unknown
+    domain?: unknown
+  } | null
+  webAccess?: {
+    url?: unknown
+    proxy_url?: unknown
+    hostname?: unknown
+    domain?: unknown
   } | null
   status?: {
     defined_at?: unknown
@@ -71,6 +91,16 @@ type CrnExecutionMapPayload = Record<string, CrnExecutionV1Payload | CrnExecutio
 type CrnExecutionLookupResult = {
   payload: CrnExecutionMapPayload | null
   blocked: boolean
+  requestUrl?: string
+  version?: 'v1' | 'v2'
+}
+
+type TwoN6HashLookupPayload = {
+  instance_hash?: unknown
+  subdomain?: unknown
+  url?: unknown
+  ipv6?: unknown
+  active?: unknown
 }
 
 function isUnconfirmedNetworkError(error: unknown): boolean {
@@ -84,6 +114,119 @@ function asString(value: unknown): string | null {
 
 function asNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function normalizeProxyUrl(value: unknown): string | null {
+  const stringValue = asString(value)
+  if (!stringValue) return null
+  if (/^https?:\/\//i.test(stringValue)) return stringValue
+  return `https://${stringValue}`
+}
+
+function extractProxyUrl(item: CrnExecutionV2Payload, networking: CrnExecutionV2Payload['networking']): string | null {
+  const networkingCandidates = [
+    networking?.proxy_url,
+    networking?.proxyUrl,
+    networking?.web_access_url,
+    networking?.webAccessUrl,
+    networking?.proxy_hostname,
+    networking?.proxyHostname,
+    networking?.domain,
+    networking?.hostname
+  ]
+
+  for (const candidate of networkingCandidates) {
+    const normalized = normalizeProxyUrl(candidate)
+    if (normalized) return normalized
+  }
+
+  const webAccessCandidates = [item.web_access, item.webAccess]
+  for (const entry of webAccessCandidates) {
+    const normalized =
+      normalizeProxyUrl(entry?.url) ??
+      normalizeProxyUrl(entry?.proxy_url) ??
+      normalizeProxyUrl(entry?.hostname) ??
+      normalizeProxyUrl(entry?.domain)
+
+    if (normalized) return normalized
+  }
+
+  return null
+}
+
+function extractProxyCandidates(item: CrnExecutionV2Payload, networking: CrnExecutionV2Payload['networking']) {
+  return {
+    networking: {
+      proxy_url: asString(networking?.proxy_url),
+      proxyUrl: asString(networking?.proxyUrl),
+      web_access_url: asString(networking?.web_access_url),
+      webAccessUrl: asString(networking?.webAccessUrl),
+      proxy_hostname: asString(networking?.proxy_hostname),
+      proxyHostname: asString(networking?.proxyHostname),
+      domain: asString(networking?.domain),
+      hostname: asString(networking?.hostname)
+    },
+    web_access: item.web_access
+      ? {
+          url: asString(item.web_access.url),
+          proxy_url: asString(item.web_access.proxy_url),
+          hostname: asString(item.web_access.hostname),
+          domain: asString(item.web_access.domain)
+        }
+      : null,
+    webAccess: item.webAccess
+      ? {
+          url: asString(item.webAccess.url),
+          proxy_url: asString(item.webAccess.proxy_url),
+          hostname: asString(item.webAccess.hostname),
+          domain: asString(item.webAccess.domain)
+        }
+      : null
+  }
+}
+
+async function fetch2n6WebAccessUrl(instanceItemHash: string): Promise<string | null> {
+  const requestUrl = `https://api.2n6.me/api/hash/${instanceItemHash}`
+
+  try {
+    const response = await fetchWithTimeout(requestUrl, { cache: 'no-cache' })
+    if (response.status === 404) {
+      console.info('[instance-runtime] 2n6 web access lookup returned no record', {
+        instanceItemHash,
+        requestUrl,
+        status: 404
+      })
+      return null
+    }
+
+    if (!response.ok) {
+      console.info('[instance-runtime] 2n6 web access lookup returned non-ok response', {
+        instanceItemHash,
+        requestUrl,
+        status: response.status
+      })
+      return null
+    }
+
+    const payload = (await response.json()) as TwoN6HashLookupPayload
+    const url = normalizeProxyUrl(payload.url ?? payload.subdomain)
+    console.info('[instance-runtime] 2n6 web access lookup result', {
+      instanceItemHash,
+      requestUrl,
+      url,
+      active: payload.active === true,
+      raw: payload
+    })
+    return url
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.info('[instance-runtime] 2n6 web access lookup failed', {
+      instanceItemHash,
+      requestUrl,
+      error: message
+    })
+    return null
+  }
 }
 
 export function normalizeMessageStatus(status: unknown): MessageStatus {
@@ -260,6 +403,7 @@ export async function configureOrbitdbRelaySetup(args: {
   setupPort: number
   tcpPort: number
   wsPort: number
+  proxyUrl?: string | null
   metricsPort?: number | null
   metricsHttpsPort?: number | null
   webrtcPort?: number | null
@@ -280,6 +424,7 @@ export async function configureOrbitdbRelaySetup(args: {
           public_ipv6: args.publicIpv6 ?? undefined,
           tcp_port: args.tcpPort,
           ws_port: args.wsPort,
+          proxy_url: args.proxyUrl ?? undefined,
           metrics_port: args.metricsPort ?? undefined,
           metrics_https_port: args.metricsHttpsPort ?? undefined,
           webrtc_port: args.webrtcPort ?? undefined,
@@ -326,48 +471,88 @@ function manualAllocation(instance: InstanceMessage, crns: Crn[]): InstanceAlloc
 
 async function fetchCrnExecutionMap(crnUrl: string): Promise<CrnExecutionLookupResult> {
   const normalizedCrnUrl = crnUrl.replace(/\/+$/, '')
+  const v2Url = `${normalizedCrnUrl}/v2/about/executions/list`
+  const v1Url = `${normalizedCrnUrl}/about/executions/list`
 
   // CRN execution lists are only used to enrich the UI. Some CRNs do not expose
   // browser-friendly CORS headers or do not implement either endpoint, so we
   // treat those failures as "runtime details unavailable" rather than errors.
   try {
-    const v2Response = await fetchWithTimeout(`${normalizedCrnUrl}/v2/about/executions/list`, { cache: 'no-cache' })
+    const v2Response = await fetchWithTimeout(v2Url, { cache: 'no-cache' })
     if (v2Response.ok) {
+      const payload = (await v2Response.json()) as CrnExecutionMapPayload
+      console.info('[instance-runtime] fetched CRN execution list', {
+        crnUrl: normalizedCrnUrl,
+        requestUrl: v2Url,
+        version: 'v2',
+        instanceCount: Object.keys(payload ?? {}).length
+      })
       return {
-        payload: (await v2Response.json()) as CrnExecutionMapPayload,
-        blocked: false
+        payload,
+        blocked: false,
+        requestUrl: v2Url,
+        version: 'v2'
       }
     }
 
     if (v2Response.status !== 404) {
-      return { payload: null, blocked: false }
+      console.info('[instance-runtime] CRN execution list did not return usable v2 data', {
+        crnUrl: normalizedCrnUrl,
+        requestUrl: v2Url,
+        status: v2Response.status
+      })
+      return { payload: null, blocked: false, requestUrl: v2Url, version: 'v2' }
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (error instanceof TypeError || message.includes('Failed to fetch')) {
-      return { payload: null, blocked: true }
+      console.info('[instance-runtime] CRN execution list was blocked in browser', {
+        crnUrl: normalizedCrnUrl,
+        requestUrl: v2Url,
+        error: message
+      })
+      return { payload: null, blocked: true, requestUrl: v2Url, version: 'v2' }
     }
 
-    return { payload: null, blocked: false }
+    return { payload: null, blocked: false, requestUrl: v2Url, version: 'v2' }
   }
 
   try {
-    const v1Response = await fetchWithTimeout(`${normalizedCrnUrl}/about/executions/list`, { cache: 'no-cache' })
+    const v1Response = await fetchWithTimeout(v1Url, { cache: 'no-cache' })
     if (!v1Response.ok) {
-      return { payload: null, blocked: false }
+      console.info('[instance-runtime] CRN execution list did not return usable v1 data', {
+        crnUrl: normalizedCrnUrl,
+        requestUrl: v1Url,
+        status: v1Response.status
+      })
+      return { payload: null, blocked: false, requestUrl: v1Url, version: 'v1' }
     }
 
+    const payload = (await v1Response.json()) as CrnExecutionMapPayload
+    console.info('[instance-runtime] fetched CRN execution list', {
+      crnUrl: normalizedCrnUrl,
+      requestUrl: v1Url,
+      version: 'v1',
+      instanceCount: Object.keys(payload ?? {}).length
+    })
     return {
-      payload: (await v1Response.json()) as CrnExecutionMapPayload,
-      blocked: false
+      payload,
+      blocked: false,
+      requestUrl: v1Url,
+      version: 'v1'
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (error instanceof TypeError || message.includes('Failed to fetch')) {
-      return { payload: null, blocked: true }
+      console.info('[instance-runtime] CRN execution list was blocked in browser', {
+        crnUrl: normalizedCrnUrl,
+        requestUrl: v1Url,
+        error: message
+      })
+      return { payload: null, blocked: true, requestUrl: v1Url, version: 'v1' }
     }
 
-    return { payload: null, blocked: false }
+    return { payload: null, blocked: false, requestUrl: v1Url, version: 'v1' }
   }
 }
 
@@ -399,6 +584,7 @@ function normalizeExecution(item: CrnExecutionV1Payload | CrnExecutionV2Payload,
         ipv6_network: asString(networking.ipv6_network),
         ipv6_ip: asString(networking.ipv6_ip),
         ipv4_ip: asString(networking.ipv4_ip),
+        proxy_url: extractProxyUrl(v2Item, networking),
         mapped_ports: mappedPorts
       },
       status: v2Item.status
@@ -451,7 +637,8 @@ export async function fetchInstanceRuntimeDetails(
       return {
         messageStatus,
         allocation: null,
-        execution: null
+        execution: null,
+        webAccessUrl: null
       }
     }
 
@@ -459,6 +646,7 @@ export async function fetchInstanceRuntimeDetails(
       messageStatus,
       allocation: null,
       execution: null,
+      webAccessUrl: null,
       executionLookupBlocked: false,
       error: null
     }
@@ -471,6 +659,7 @@ export async function fetchInstanceRuntimeDetails(
     }
 
     const crnUrl = details.allocation?.crnUrl
+    details.webAccessUrl = await fetch2n6WebAccessUrl(instance.item_hash)
     if (!crnUrl) return details
 
     try {
@@ -483,9 +672,28 @@ export async function fetchInstanceRuntimeDetails(
       const executionLookup = await executionPromise
       details.executionLookupBlocked = executionLookup.blocked
       const executionPayload = executionLookup.payload?.[instance.item_hash]
+      console.info('[instance-runtime] inspected execution payload for web access proxy', {
+        instanceItemHash: instance.item_hash,
+        crnUrl,
+        requestUrl: executionLookup.requestUrl ?? null,
+        executionVersion: executionLookup.version ?? null,
+        hasExecutionPayload: Boolean(executionPayload)
+      })
       if (executionPayload) {
         details.execution = normalizeExecution(executionPayload, crnUrl)
         details.executionLookupBlocked = false
+        if (details.execution.version === 'v2') {
+          const v2Payload = executionPayload as CrnExecutionV2Payload
+          console.info('[instance-runtime] web access proxy inspection result', {
+            instanceItemHash: instance.item_hash,
+            requestUrl: executionLookup.requestUrl ?? null,
+            proxyUrl: details.execution.networking.proxy_url ?? null,
+            rawCandidates: extractProxyCandidates(v2Payload, v2Payload.networking ?? null)
+          })
+        }
+        if (!details.execution.networking.proxy_url && details.webAccessUrl) {
+          details.execution.networking.proxy_url = details.webAccessUrl
+        }
       }
     } catch (error) {
       details.error = error instanceof Error ? error.message : String(error)

@@ -42,6 +42,8 @@ export interface RootfsResolution {
   messageType: string | null
   cid: string | null
   receptionTime?: string | null
+  rejectionErrorCode?: number | null
+  rejectionReason?: string | null
   gatewayUrl: string | null
   gatewayStatus: GatewayProbeStatus
   gatewayError?: string | null
@@ -157,6 +159,64 @@ export interface DeploymentValidation {
   errors: string[]
   warnings: string[]
   quote: PaymentQuote | null
+}
+
+export type AAWalletKind = 'eoa' | 'smart-account' | 'delegated-eoa' | 'unknown'
+export type PrepaidEnforcementLevel = 'none' | 'soft-gate' | 'contract-signature-ready'
+
+export interface AAWalletAssessment {
+  ownerAddress: string
+  codeHash: string | null
+  hasCode: boolean
+  kind: AAWalletKind
+  supportsContractSignatures: boolean
+  enforcementLevel: PrepaidEnforcementLevel
+  warnings: string[]
+}
+
+export interface DeploymentIntent {
+  ownerAddress: string
+  messageTime: number
+  itemHash: string
+  paymentType: PaymentMode
+  rootfsRef: string
+  rootfsSizeMiB: number
+  computeUnits: number
+  vcpus: number
+  memoryMiB: number
+  crnHash: string | null
+  channel: string
+  expiresAt: number
+  maxCost: string
+}
+
+export interface DeploymentIntentEnvelope {
+  intent: DeploymentIntent
+  intentHash: string
+}
+
+export interface PrepaidReservation {
+  intentHash: string
+  ownerAddress: string
+  reservedAmount: bigint
+  expiresAt: number
+  consumed: boolean
+  expired: boolean
+}
+
+export interface PrepaidVaultState {
+  configured: boolean
+  chain: PaymentChain | null
+  tokenAddress: string | null
+  vaultAddress: string | null
+  ownerAddress: string | null
+  totalDeposited: bigint
+  availableBalance: bigint
+  reservedBalance: bigint
+  currentReservation: PrepaidReservation | null
+  enforcementLevel: PrepaidEnforcementLevel
+  aaWallet: AAWalletAssessment | null
+  warnings: string[]
 }
 
 export interface AlephInstanceContent {
@@ -308,6 +368,7 @@ export interface InstanceExecutionNetworking {
   ipv6_network?: string | null
   ipv6_ip?: string | null
   ipv4_ip?: string | null
+  proxy_url?: string | null
   mapped_ports?: Record<string, InstancePortMapping>
 }
 
@@ -323,6 +384,7 @@ export interface InstanceRuntimeDetails {
   messageStatus: MessageStatus
   allocation: InstanceAllocation | null
   execution: InstanceExecution | null
+  webAccessUrl?: string | null
   executionLookupBlocked?: boolean
   error?: string | null
 }

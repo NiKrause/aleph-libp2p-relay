@@ -6,6 +6,7 @@ SERVICE_USER="${SERVICE_USER:-orbitdb-relay}"
 DATA_DIR="${DATA_DIR:-/var/lib/orbitdb-relay-pinner}"
 ENV_FILE="${ENV_FILE:-/etc/default/orbitdb-relay-pinner}"
 NODE_MIN_MAJOR="${NODE_MIN_MAJOR:-22}"
+CADDY_READY_FILE="${CADDY_READY_FILE:-/etc/default/orbitdb-relay-pinner.caddy-ready}"
 
 if [ ! -d "${INSTALL_DIR}" ]; then
   echo "Missing ${INSTALL_DIR}; the rootfs build did not copy orbitdb-relay-pinner."
@@ -14,7 +15,7 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y ca-certificates curl gnupg python3 build-essential
+apt-get install -y ca-certificates curl gnupg python3 build-essential caddy
 
 if ! command -v node >/dev/null 2>&1 || [ "$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0)" -lt "${NODE_MIN_MAJOR}" ]; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
@@ -78,6 +79,13 @@ fi
 touch "${ENV_FILE}"
 chmod 0640 "${ENV_FILE}"
 chown "root:${SERVICE_USER}" "${ENV_FILE}"
+rm -f "${CADDY_READY_FILE}"
+
+mkdir -p /etc/caddy /etc/systemd/system/caddy.service.d
+cat > /etc/systemd/system/caddy.service.d/orbitdb-relay-pinner.conf <<EOF
+[Unit]
+ConditionPathExists=${CADDY_READY_FILE}
+EOF
 
 write_env_var() {
   local key="$1"
@@ -92,11 +100,13 @@ write_env_var() {
 
 write_env_var "DATASTORE_PATH" "${DATA_DIR}"
 write_env_var "METRICS_PORT" "9090"
-write_env_var "METRICS_HTTPS_ENABLED" "1"
-write_env_var "METRICS_HTTPS_PORT" "9443"
+write_env_var "METRICS_HTTPS_ENABLED" "0"
 write_env_var "RELAY_TCP_PORT" "9091"
 write_env_var "RELAY_WS_PORT" "9092"
 write_env_var "RELAY_WEBRTC_PORT" "9093"
 write_env_var "RELAY_QUIC_PORT" "9094"
+write_env_var "RELAY_DISABLE_WEBRTC" "1"
+write_env_var "RELAY_DISABLE_BOOTSTRAP" "1"
+write_env_var "disableAutoTLS" "1"
 write_env_var "ENABLE_GENERAL_LOGS" "1"
-write_env_var "DEBUG" "'libp2p:auto-tls,libp2p:auto-tls:*,libp2p:websockets:listener'"
+write_env_var "DEBUG" "'libp2p:websockets:listener'"

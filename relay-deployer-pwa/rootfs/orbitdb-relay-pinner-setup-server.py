@@ -26,6 +26,24 @@ def _validate_port(value: object, field_name: str) -> str:
     return str(value)
 
 
+def _validate_proxy_hostname(value: object) -> str | None:
+    if value is None:
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("proxy_url must be a string when provided")
+
+    candidate = value.strip()
+    if not candidate:
+        return None
+
+    parsed = urlsplit(candidate if "://" in candidate else f"https://{candidate}")
+    if not parsed.hostname:
+        raise ValueError("proxy_url must include a valid hostname")
+
+    return parsed.hostname
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "OrbitdbRelaySetup/1.0"
 
@@ -87,6 +105,7 @@ class Handler(BaseHTTPRequestHandler):
                 public_ipv6 = str(ipaddress.ip_address(public_ipv6))
             tcp_port = _validate_port(payload.get("tcp_port"), "tcp_port")
             ws_port = _validate_port(payload.get("ws_port"), "ws_port")
+            proxy_hostname = _validate_proxy_hostname(payload.get("proxy_url"))
             metrics_port = payload.get("metrics_port")
             metrics_https_port = payload.get("metrics_https_port")
             webrtc_port = payload.get("webrtc_port")
@@ -100,6 +119,8 @@ class Handler(BaseHTTPRequestHandler):
                 "--ws-port",
                 ws_port,
             ]
+            if proxy_hostname is not None:
+                args.extend(["--proxy-hostname", proxy_hostname])
             if public_ipv6 is not None:
                 args.extend(["--public-ipv6", public_ipv6])
             if metrics_port is not None:

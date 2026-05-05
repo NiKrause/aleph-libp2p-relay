@@ -150,6 +150,10 @@ legend {
   overflow-wrap: anywhere;
 }
 
+.status-item small.summary-error {
+  color: #b91c1c;
+}
+
 .metric-stack {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -486,6 +490,11 @@ textarea:focus {
   line-height: 1.45;
 }
 
+.prepaid-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+}
+
 .validation-list {
   display: grid;
   gap: 8px;
@@ -771,6 +780,30 @@ textarea:focus {
 
 .instance-detail-links a {
   font-weight: 700;
+}
+
+.instance-inline-detail {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.instance-copy-button {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.instance-copy-button:hover:not(:disabled) {
+  border-color: #94a3b8;
+  color: #0f172a;
 }
 
 .instance-detail-wide {

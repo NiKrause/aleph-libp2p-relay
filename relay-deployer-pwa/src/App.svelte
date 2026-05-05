@@ -10,30 +10,51 @@
     waitForDeploymentResult
   } from './lib/alephApi'
   import { deleteInstance } from './lib/alephForget'
-  import { deployInstance } from './lib/alephMessage'
+  import { createDeploymentIntent, deployInstance } from './lib/alephMessage'
   import {
     DEFAULT_DEPLOYMENT_FORM,
     compatibleCrns,
     normalizeSshPublicKey,
+    prepaidValidationErrors,
+    quoteRequiredBudgetUnits,
     selectedTier,
     tierSpec,
     validateDeployment
   } from './lib/deployment'
   import { enrichCrnsWithGeo } from './lib/crnGeo'
   import { crnDisplayLabel, crnLocationLabel, crnScoreLabel, explorerUrl, apiMessageUrl, dateLabel, formatNumber, shortHash } from './lib/format'
+  import {
+    approvePrepaidBudget,
+    consumeDeploymentReservation,
+    depositPrepaidBudget,
+    formatBudgetUnits,
+    loadPrepaidVaultState,
+    paymentChainFromChainId,
+    prepaidVaultConfigured,
+    refundExpiredReservation,
+    reserveDeploymentBudget
+  } from './lib/prepaid'
   import { fetchInstancePricing } from './lib/pricing'
   import { ensureInstancePortForwards, portForwardLabel } from './lib/portForwarding'
   import { loadRootfsManifest, resolveRootfsReference, verifyRootfsExists } from './lib/rootfsManifest'
-  import { connectWallet, type WalletState } from './lib/wallet'
-  import { ALEPH_BASE_ROOTFS_OPTIONS, ALEPH_INSTANCE_DOCS_URL } from './lib/config'
+  import { assessAAWallet, connectWallet, type WalletState } from './lib/wallet'
+  import {
+    ALEPH_BASE_ROOTFS_OPTIONS,
+    ALEPH_INSTANCE_DOCS_URL,
+    ALEPH_PERMISSIONS_DOCS_URL,
+    PREPAID_VAULT_ADDRESS
+  } from './lib/config'
   import type {
+    AAWalletAssessment,
     BalanceResponse,
     Crn,
     DeploymentForm,
+    DeploymentIntentEnvelope,
     DeploymentResult,
     InstanceMessage,
     InstanceRuntimeDetails,
     PricingState,
+    PrepaidVaultState,
     RootfsManifestState,
     RootfsResolution,
     Tier
@@ -54,6 +75,24 @@
   let instanceDetailsRequestKey = ''
   let instanceDetailsRefreshNonce = 0
   let deploymentResult: DeploymentResult | null = null
+  let currentIntentEnvelope: DeploymentIntentEnvelope | null = null
+  let aaWalletAssessment: AAWalletAssessment | null = null
+  let prepaidState: PrepaidVaultState = {
+    configured: false,
+    chain: null,
+    tokenAddress: null,
+    vaultAddress: PREPAID_VAULT_ADDRESS || null,
+    ownerAddress: null,
+    totalDeposited: 0n,
+    availableBalance: 0n,
+    reservedBalance: 0n,
+    currentReservation: null,
+    enforcementLevel: 'none',
+    aaWallet: null,
+    warnings: []
+  }
+  let prepaidBusy = false
+  let prepaidRequestKey = ''
   let deletingInstanceHash = ''
   let startingInstanceHash = ''
   let instanceActionFeedback: Record<string, { tone: 'info' | 'error'; message: string }> = {}
@@ -61,6 +100,7 @@
   let instanceSetupApplied: Record<string, string> = {}
   let instanceSetupAttempted: Record<string, string> = {}
   let instanceSetupPendingReachability: Record<string, string> = {}
+  let instanceSshCopied: Record<string, boolean> = {}
   let crnGeoLookupInFlight: Record<string, boolean> = {}
   let networkBusy = false
   let walletBusy = false
@@ -97,6 +137,15 @@
   $: rootfsDisplayLabel = usingBaseRootfs
     ? selectedBaseRootfs.label
     : rootfsState.manifest?.version ?? 'missing'
+  $: rootfsCreatedAtLabel = !usingBaseRootfs && rootfsState.manifest?.createdAt
+    ? dateLabel(rootfsState.manifest.createdAt)
+    : null
+  $: rootfsPublishedAtLabel = !usingBaseRootfs && rootfsResolution?.receptionTime
+    ? dateLabel(rootfsResolution.receptionTime)
+    : null
+  $: rootfsSummaryIssueLabel = rootfsRejected
+    ? rootfsResolution?.rejectionReason ?? 'Rejected by Aleph.'
+    : null
   $: rootfsSourceSizeMiB = !usingBaseRootfs && rootfsState.manifest?.rootfsSourceSizeBytes
     ? rootfsState.manifest.rootfsSourceSizeBytes / (1024 * 1024)
     : null
@@ -112,7 +161,7 @@
         .filter(([, amount]) => Number(amount) > 0)
         .map(([chain, amount]) => `${chain}: ${formatNumber(Number(amount), 4)}`)
     : []
-  $: validation = validateDeployment({
+  $: baseValidation = validateDeployment({
     form,
     manifest: rootfsState.manifest,
     rootfsResolution,
@@ -121,8 +170,27 @@
     crns,
     rootfsVerified
   })
+  $: prepaidErrors = prepaidValidationErrors({
+    aaWallet: aaWalletAssessment,
+    quote: baseValidation.quote,
+    availableBalance: prepaidState.availableBalance,
+    currentReservationAmount: prepaidState.currentReservation?.reservedAmount ?? 0n,
+    reservationExpired: prepaidState.currentReservation?.expired ?? false,
+    prepaidConfigured: prepaidState.configured
+  })
+  $: validation = {
+    ...baseValidation,
+    errors: [...baseValidation.errors, ...prepaidErrors],
+    ok: baseValidation.ok && prepaidErrors.length === 0
+  }
   $: availableTiers = pricing?.tiers ?? []
   $: selectedCrnOption = form.selectedCrnHash ? crns.find((crn) => crn.hash === form.selectedCrnHash) ?? null : null
+  $: prepaidConfigured = prepaidVaultConfigured()
+  $: prepaidRequiredBudget = quoteRequiredBudgetUnits(baseValidation.quote)
+  $: prepaidAvailableDisplay = formatBudgetUnits(prepaidState.availableBalance)
+  $: prepaidReservedDisplay = formatBudgetUnits(prepaidState.reservedBalance)
+  $: prepaidTotalDisplay = formatBudgetUnits(prepaidState.totalDeposited)
+  $: connectedPaymentChain = paymentChainFromChainId(wallet?.chainId ?? null)
   $: if (sshPublicKeyStorageReady) persistSshPublicKey(form.sshPublicKey)
   $: if (
     selectedCrnOption &&
@@ -147,6 +215,46 @@
     } else if (requestKey && requestKey !== instanceDetailsRequestKey) {
       instanceDetailsRequestKey = requestKey
       void refreshInstanceDetails(currentWallet.address, instances, crns, requestKey)
+    }
+  }
+  $: {
+    const currentWallet = wallet
+    const requestKey =
+      currentWallet && pricing && tier
+        ? [
+            currentWallet.address,
+            currentWallet.chainId ?? '',
+            form.name,
+            form.rootfsSourceMode,
+            form.baseRootfs,
+            form.tierId,
+            form.selectedCrnHash,
+            normalizeSshPublicKey(form.sshPublicKey),
+            rootfsState.manifest?.rootfsItemHash ?? ''
+          ].join(':')
+        : ''
+
+    if (!currentWallet || !pricing || !tier) {
+      prepaidRequestKey = ''
+      aaWalletAssessment = null
+      currentIntentEnvelope = null
+      prepaidState = {
+        configured: false,
+        chain: null,
+        tokenAddress: null,
+        vaultAddress: PREPAID_VAULT_ADDRESS || null,
+        ownerAddress: null,
+        totalDeposited: 0n,
+        availableBalance: 0n,
+        reservedBalance: 0n,
+        currentReservation: null,
+        enforcementLevel: 'none',
+        aaWallet: null,
+        warnings: []
+      }
+    } else if (requestKey && requestKey !== prepaidRequestKey) {
+      prepaidRequestKey = requestKey
+      void refreshPrepaidContext(requestKey)
     }
   }
 
@@ -451,11 +559,134 @@
     }
   }
 
+  async function refreshPrepaidContext(requestKey: string) {
+    if (!wallet || !pricing || !tier) return
+
+    prepaidBusy = true
+    try {
+      const normalizedSshPublicKey = normalizeSshPublicKey(form.sshPublicKey)
+      const selectedCrn = form.selectedCrnHash ? crns.find((crn) => crn.hash === form.selectedCrnHash) ?? null : null
+      const assessment = await assessAAWallet(wallet.address)
+      const intentEnvelope = await createDeploymentIntent({
+        sender: wallet.address,
+        form: { ...form, sshPublicKey: normalizedSshPublicKey },
+        manifest: usingBaseRootfs ? null : rootfsState.manifest,
+        pricing,
+        tier,
+        selectedCrn,
+        quoteRequiredBudget: quoteRequiredBudgetUnits(baseValidation.quote)
+      })
+      const nextPrepaidState = await loadPrepaidVaultState({
+        ownerAddress: wallet.address,
+        currentIntentHash: intentEnvelope.intentHash,
+        aaWallet: assessment
+      })
+
+      if (prepaidRequestKey === requestKey && wallet?.address === assessment.ownerAddress) {
+        aaWalletAssessment = assessment
+        currentIntentEnvelope = intentEnvelope
+        prepaidState = nextPrepaidState
+      }
+    } catch (error) {
+      if (prepaidRequestKey === requestKey) {
+        aaWalletAssessment = null
+        currentIntentEnvelope = null
+        prepaidState = {
+          configured: prepaidConfigured,
+          chain: connectedPaymentChain,
+          tokenAddress: null,
+          vaultAddress: PREPAID_VAULT_ADDRESS || null,
+          ownerAddress: wallet.address,
+          totalDeposited: 0n,
+          availableBalance: 0n,
+          reservedBalance: 0n,
+          currentReservation: null,
+          enforcementLevel: 'none',
+          aaWallet: null,
+          warnings: [error instanceof Error ? error.message : String(error)]
+        }
+      }
+    } finally {
+      if (prepaidRequestKey === requestKey) prepaidBusy = false
+    }
+  }
+
+  async function refreshPrepaidStateOnly() {
+    if (!prepaidRequestKey) return
+    await refreshPrepaidContext(prepaidRequestKey)
+  }
+
+  async function approveCurrentPrepaidBudget() {
+    await runTask('Approving prepaid budget', async () => {
+      if (!wallet) throw new Error('Connect MetaMask before approving prepaid budget.')
+      if (!connectedPaymentChain) throw new Error('Switch to ETH, BASE, or AVAX before approving prepaid budget.')
+      if (!prepaidRequiredBudget) throw new Error('A live deployment quote is required before approving prepaid budget.')
+
+      statusText = 'Waiting for wallet approval'
+      await approvePrepaidBudget({
+        ownerAddress: wallet.address,
+        amount: prepaidRequiredBudget,
+        chain: connectedPaymentChain
+      })
+      await refreshPrepaidStateOnly()
+      statusText = 'Prepaid approval submitted'
+    }, 'deploy')
+  }
+
+  async function depositCurrentPrepaidBudget() {
+    await runTask('Depositing prepaid budget', async () => {
+      if (!wallet) throw new Error('Connect MetaMask before depositing prepaid budget.')
+      if (!prepaidRequiredBudget) throw new Error('A live deployment quote is required before depositing prepaid budget.')
+
+      statusText = 'Waiting for wallet confirmation'
+      await depositPrepaidBudget({
+        ownerAddress: wallet.address,
+        amount: prepaidRequiredBudget
+      })
+      await refreshPrepaidStateOnly()
+      statusText = 'Prepaid deposit submitted'
+    }, 'deploy')
+  }
+
+  async function reserveCurrentDeploymentIntent() {
+    await runTask('Reserving prepaid budget', async () => {
+      if (!wallet) throw new Error('Connect MetaMask before reserving prepaid budget.')
+      if (!currentIntentEnvelope) throw new Error('Deployment intent is not ready yet.')
+      if (!prepaidRequiredBudget) throw new Error('A live deployment quote is required before reserving prepaid budget.')
+
+      statusText = 'Waiting for wallet confirmation'
+      await reserveDeploymentBudget({
+        ownerAddress: wallet.address,
+        intentHash: currentIntentEnvelope.intentHash,
+        amount: prepaidRequiredBudget,
+        expiresAt: currentIntentEnvelope.intent.expiresAt
+      })
+      await refreshPrepaidStateOnly()
+      statusText = 'Prepaid reservation submitted'
+    }, 'deploy')
+  }
+
+  async function refundCurrentReservation() {
+    await runTask('Refunding expired reservation', async () => {
+      if (!wallet) throw new Error('Connect MetaMask before refunding reservations.')
+      if (!currentIntentEnvelope) throw new Error('Deployment intent is not ready yet.')
+
+      statusText = 'Waiting for wallet confirmation'
+      await refundExpiredReservation({
+        ownerAddress: wallet.address,
+        intentHash: currentIntentEnvelope.intentHash
+      })
+      await refreshPrepaidStateOnly()
+      statusText = 'Expired reservation refunded'
+    }, 'deploy')
+  }
+
   async function submitDeployment() {
     await runTask('Preparing deployment', async () => {
       if (!wallet) throw new Error('Connect MetaMask before deployment.')
       if (!pricing || !tier || (!usingBaseRootfs && !rootfsState.manifest)) throw new Error('Network data is incomplete.')
       if (!validation.ok) throw new Error(validation.errors.join(' '))
+      if (!currentIntentEnvelope) throw new Error('Deployment intent is not ready yet.')
 
       const selectedCrn = form.selectedCrnHash
         ? crns.find((crn) => crn.hash === form.selectedCrnHash) ?? null
@@ -472,7 +703,8 @@
         manifest: usingBaseRootfs ? null : rootfsState.manifest,
         pricing,
         tier,
-        selectedCrn
+        selectedCrn,
+        now: currentIntentEnvelope.intent.messageTime
       })
 
       if (deploymentResult.status !== 'processed') {
@@ -524,6 +756,21 @@
         }
       }
 
+      if (deploymentResult.status === 'processed' && prepaidState.configured) {
+        try {
+          statusText = 'Consuming prepaid reservation'
+          await consumeDeploymentReservation({
+            ownerAddress: wallet.address,
+            intentHash: currentIntentEnvelope.intentHash,
+            amount: prepaidRequiredBudget
+          })
+          feedbackMessages.push(`Prepaid reservation consumed for ${formatNumber(formatBudgetUnits(prepaidRequiredBudget), 4)} budget units.`)
+        } catch (error) {
+          feedbackTone = 'error'
+          feedbackMessages.push(`Prepaid reservation consume failed: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+
       if (deploymentResult.status === 'processed' && feedbackMessages.length > 0) {
         instanceActionFeedback = {
           ...instanceActionFeedback,
@@ -537,6 +784,7 @@
       instances = await fetchInstances(wallet.address)
       balance = await fetchBalance(wallet.address)
       instanceDetailsRefreshNonce += 1
+      await refreshPrepaidStateOnly()
 
       if (deploymentResult.status === 'rejected') {
         statusText = 'Deployment rejected'
@@ -668,6 +916,11 @@
     return details?.execution?.networking?.ipv6_ip || details?.execution?.networking?.ipv6 || details?.allocation?.vmIpv6 || null
   }
 
+  function instanceWebAccessProxyUrl(instance: InstanceMessage) {
+    const details = instanceDetails[instance.item_hash]
+    return details?.execution?.networking?.proxy_url ?? details?.webAccessUrl ?? null
+  }
+
   function instanceSchedulerUrl(instance: InstanceMessage) {
     return `${ALEPH_SCHEDULER_ALLOCATION_BASE_URL}/${instance.item_hash}`
   }
@@ -700,9 +953,27 @@
     const hostIpv4 = networking?.host_ipv4
     const ipv6 = networking?.ipv6_ip || networking?.ipv6 || details?.allocation?.vmIpv6
 
-    if (hostIpv4 && sshPort) return `ssh root@${hostIpv4} -p ${sshPort} -i <ssh-private-key>`
-    if (ipv6) return `ssh root@${ipv6} -i <ssh-private-key>`
+    if (hostIpv4 && sshPort) return `ssh root@${hostIpv4} -p ${sshPort}`
+    if (ipv6) return `ssh root@${ipv6}`
     return null
+  }
+
+  async function copyInstanceSshCommand(instance: InstanceMessage) {
+    const command = instanceSshCommand(instance)
+    if (!command || !navigator?.clipboard?.writeText) return
+
+    await navigator.clipboard.writeText(command)
+    instanceSshCopied = {
+      ...instanceSshCopied,
+      [instance.item_hash]: true
+    }
+
+    window.setTimeout(() => {
+      instanceSshCopied = {
+        ...instanceSshCopied,
+        [instance.item_hash]: false
+      }
+    }, 1600)
   }
 
   function mappedPorts(instance: InstanceMessage) {
@@ -710,30 +981,79 @@
   }
 
   function orbitdbSetupTarget(instance: InstanceMessage) {
-    if (rootfsState.manifest?.profile !== 'orbitdb-relay-pinner') return null
+    const profile = rootfsState.manifest?.profile
+    if (profile !== 'orbitdb-relay-pinner' && profile !== 'uc-rust-peer' && profile !== 'uc-go-peer') return null
     if (instance.content?.rootfs?.parent?.ref !== rootfsState.manifest.rootfsItemHash) return null
     const details = instanceDetails[instance.item_hash]
     const networking = details?.execution?.networking
     const hostIpv4 = networking?.host_ipv4
     const publicIpv6 = networking?.ipv6_ip || networking?.ipv6 || details?.allocation?.vmIpv6 || null
     const setupPort = networking?.mapped_ports?.['80']?.host
-    const metricsPort = networking?.mapped_ports?.['9090']?.host ?? null
-    const metricsHttpsPort = networking?.mapped_ports?.['9443']?.host ?? null
-    const tcpPort = networking?.mapped_ports?.['9091']?.host
-    const wsPort = networking?.mapped_ports?.['9092']?.host
+    const proxyUrl = instanceWebAccessProxyUrl(instance)
+    if (!hostIpv4 || !setupPort) return null
 
-    if (!hostIpv4 || !setupPort || !tcpPort || !wsPort) return null
+    if (profile === 'orbitdb-relay-pinner') {
+      const metricsPort = networking?.mapped_ports?.['9090']?.host ?? null
+      const metricsHttpsPort = networking?.mapped_ports?.['9443']?.host ?? null
+      const tcpPort = networking?.mapped_ports?.['9091']?.host
+      const wsPort = networking?.mapped_ports?.['443']?.host ?? networking?.mapped_ports?.['9092']?.host
+
+      if (!tcpPort || !wsPort) return null
+
+      return {
+        profile,
+        serviceName: 'orbitdb-relay-pinner',
+        hostIpv4,
+        publicIpv6,
+        setupPort,
+        tcpPort,
+        wsPort,
+        proxyUrl,
+        metricsPort,
+        metricsHttpsPort,
+        webrtcPort: networking?.mapped_ports?.['9093']?.host ?? null,
+        quicPort: networking?.mapped_ports?.['9094']?.host ?? null
+      }
+    }
+
+    if (profile === 'uc-go-peer') {
+      const tcpPort = networking?.mapped_ports?.['9095']?.host
+      const wsPort = networking?.mapped_ports?.['9096']?.host
+      if (!tcpPort || !wsPort) return null
+
+      return {
+        profile,
+        serviceName: 'uc-go-peer',
+        hostIpv4,
+        publicIpv6,
+        setupPort,
+        tcpPort,
+        wsPort,
+        proxyUrl: null,
+        metricsPort: null,
+        metricsHttpsPort: null,
+        webrtcPort: networking?.mapped_ports?.['9098']?.host ?? null,
+        quicPort: networking?.mapped_ports?.['9097']?.host ?? null
+      }
+    }
+
+    const tcpPort = networking?.mapped_ports?.['9092']?.host
+    const wsPort = networking?.mapped_ports?.['443']?.host ?? networking?.mapped_ports?.['9093']?.host
+    if (!tcpPort || !wsPort) return null
 
     return {
+      profile,
+      serviceName: 'uc-rust-peer',
       hostIpv4,
       publicIpv6,
       setupPort,
       tcpPort,
       wsPort,
-      metricsPort,
-      metricsHttpsPort,
-      webrtcPort: networking?.mapped_ports?.['9093']?.host ?? null,
-      quicPort: networking?.mapped_ports?.['9094']?.host ?? null
+      proxyUrl,
+      metricsPort: null,
+      metricsHttpsPort: null,
+      webrtcPort: networking?.mapped_ports?.['9090']?.host ?? null,
+      quicPort: networking?.mapped_ports?.['9091']?.host ?? null
     }
   }
 
@@ -747,6 +1067,7 @@
       target.setupPort,
       target.tcpPort,
       target.wsPort,
+      target.proxyUrl ?? '',
       target.metricsPort ?? '',
       target.metricsHttpsPort ?? '',
       target.webrtcPort ?? '',
@@ -769,7 +1090,7 @@
     const target = orbitdbSetupTarget(instance)
     if (!target) return null
 
-    return `Aleph has already published the mapped setup port ${target.hostIpv4}:${target.setupPort}, but that external CRN port-forward is not confirming reachability yet. The VM-side setup server can still be listening on internal port 80.`
+    return `Aleph has already published the mapped setup port ${target.hostIpv4}:${target.setupPort}, but that external CRN port-forward is not confirming reachability yet. The VM-side setup server can still be listening on internal port 80 for ${target.serviceName}.`
   }
 
   async function configureOrbitdbRelayInstance(
@@ -787,11 +1108,11 @@
     instanceActionFeedback = {
       ...instanceActionFeedback,
       [instance.item_hash]: {
-        tone: 'info',
-        message:
-          source === 'manual'
-            ? 'Retrying orbitdb relay setup with the current mapped Aleph ports...'
-            : 'Configuring orbitdb relay setup endpoint with mapped Aleph ports...'
+          tone: 'info',
+          message:
+            source === 'manual'
+            ? `Retrying ${target.serviceName} setup with the current mapped Aleph ports...`
+            : `Configuring ${target.serviceName} setup endpoint with mapped Aleph ports...`
       }
     }
 
@@ -816,7 +1137,7 @@
           ...instanceActionFeedback,
           [instance.item_hash]: {
             tone: 'info',
-            message: 'Relay setup endpoint accepted the mapped ports and started orbitdb-relay-pinner.'
+            message: `Relay setup endpoint accepted the mapped ports and started ${target.serviceName}.`
           }
         }
       } else {
@@ -1086,6 +1407,9 @@
               <small>{rootfsInstallStrategy} image</small>
             {/if}
             <small>{rootfsStatusLabel}</small>
+            {#if rootfsSummaryIssueLabel}
+              <small class="summary-error">{rootfsSummaryIssueLabel}</small>
+            {/if}
           </div>
         </div>
         <div class="status-item">
@@ -1292,6 +1616,93 @@
         </div>
       </div>
 
+      {#if prepaidConfigured}
+        <div class="rootfs-panel prepaid-panel">
+          <div>
+            <span>Prepaid vault</span>
+            <strong>{prepaidState.vaultAddress ? shortHash(prepaidState.vaultAddress, 8, 6) : 'configured'}</strong>
+          </div>
+          <div>
+            <span>Wallet mode</span>
+            <strong>{aaWalletAssessment?.kind ?? 'checking'}</strong>
+          </div>
+          <div>
+            <span>Enforcement</span>
+            <strong>{prepaidState.enforcementLevel}</strong>
+          </div>
+          <div>
+            <span>Chain</span>
+            <strong>{connectedPaymentChain ?? '-'}</strong>
+          </div>
+          <div>
+            <span>Total prepaid</span>
+            <strong>{formatNumber(prepaidTotalDisplay, 4)}</strong>
+          </div>
+          <div>
+            <span>Available prepaid</span>
+            <strong>{formatNumber(prepaidAvailableDisplay, 4)}</strong>
+          </div>
+          <div>
+            <span>Reserved prepaid</span>
+            <strong>{formatNumber(prepaidReservedDisplay, 4)}</strong>
+          </div>
+          <div>
+            <span>Current intent</span>
+            <strong>{currentIntentEnvelope ? shortHash(currentIntentEnvelope.intentHash, 8, 6) : '-'}</strong>
+          </div>
+          <div>
+            <span>Reservation</span>
+            <strong>
+              {#if prepaidState.currentReservation}
+                {prepaidState.currentReservation.expired ? 'expired' : prepaidState.currentReservation.consumed ? 'consumed' : 'active'}
+              {:else}
+                none
+              {/if}
+            </strong>
+          </div>
+          <div class="rootfs-links">
+            <a href={ALEPH_PERMISSIONS_DOCS_URL} target="_blank" rel="noreferrer">Aleph permissions</a>
+            <a href={ALEPH_INSTANCE_DOCS_URL} target="_blank" rel="noreferrer">Aleph instance docs</a>
+          </div>
+          <p class="rootfs-note">
+            This prepaid flow assumes the connected wallet address is the Aleph owner and that upstream Aleph message verification can honor contract-based signatures for hard enforcement.
+          </p>
+          {#if currentIntentEnvelope}
+            <p class="rootfs-note">
+              Current intent expires {dateLabel(currentIntentEnvelope.intent.expiresAt)} and reserves {formatNumber(formatBudgetUnits(prepaidRequiredBudget), 4)} budget units.
+            </p>
+          {/if}
+          {#if prepaidBusy}
+            <p class="rootfs-note">Refreshing prepaid state…</p>
+          {/if}
+          {#each prepaidState.warnings as warning}
+            <p class="validation-warning">{warning}</p>
+          {/each}
+          <div class="instance-links prepaid-actions">
+            <button class="secondary-button" type="button" on:click={approveCurrentPrepaidBudget} disabled={!wallet || deployBusy || !connectedPaymentChain}>
+              Approve quote
+            </button>
+            <button class="secondary-button" type="button" on:click={depositCurrentPrepaidBudget} disabled={!wallet || deployBusy}>
+              Deposit quote
+            </button>
+            <button class="secondary-button" type="button" on:click={reserveCurrentDeploymentIntent} disabled={!wallet || deployBusy || !currentIntentEnvelope}>
+              Reserve intent
+            </button>
+            <button
+              class="secondary-button"
+              type="button"
+              on:click={refundCurrentReservation}
+              disabled={!wallet || deployBusy || !prepaidState.currentReservation?.expired}
+            >
+              Refund expired
+            </button>
+            <button class="secondary-button" type="button" on:click={refreshPrepaidStateOnly} disabled={!wallet || deployBusy}>
+              Refresh prepaid
+            </button>
+          </div>
+        </div>
+      {/if}
+
       {#if usingBaseRootfs}
         <div class="rootfs-panel">
           <div>
@@ -1318,6 +1729,14 @@
             <strong>{rootfsInstallStrategy ?? 'unspecified'}</strong>
           </div>
           <div>
+            <span>Built</span>
+            <strong>{rootfsCreatedAtLabel ?? '-'}</strong>
+          </div>
+          <div>
+            <span>Uploaded to Aleph</span>
+            <strong>{rootfsPublishedAtLabel ?? '-'}</strong>
+          </div>
+          <div>
             <span>Aleph STORE status</span>
             <strong>{rootfsResolution.messageStatus}</strong>
           </div>
@@ -1337,6 +1756,9 @@
           </div>
           {#if rootfsResolution.gatewayError}
             <p class="rootfs-note">{rootfsResolution.gatewayError}</p>
+          {/if}
+          {#if rootfsResolution.rejectionReason}
+            <p class="rootfs-note validation-error">{rootfsResolution.rejectionReason}</p>
           {/if}
           {#if rootfsBootstrapNetworkRequired}
             <p class="rootfs-note">This rootfs completes runtime setup on first boot and needs outbound network access.</p>
@@ -1548,7 +1970,27 @@
             {#if instanceSshCommand(instance)}
               <div class="instance-detail-wide">
                 <span>SSH</span>
-                <strong>{instanceSshCommand(instance)}</strong>
+                <div class="instance-inline-detail">
+                  <strong>{instanceSshCommand(instance)}</strong>
+                  <button
+                    class="instance-copy-button"
+                    type="button"
+                    on:click={() => copyInstanceSshCommand(instance)}
+                    title="Copy SSH command"
+                  >
+                    {instanceSshCopied[instance.item_hash] ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+            {/if}
+            {#if instanceWebAccessProxyUrl(instance)}
+              <div class="instance-detail-wide">
+                <span>Web access</span>
+                <div class="instance-detail-links">
+                  <a href={instanceWebAccessProxyUrl(instance) ?? '#'} target="_blank" rel="noreferrer">
+                    {instanceWebAccessProxyUrl(instance)}
+                  </a>
+                </div>
               </div>
             {/if}
             {#if mappedPorts(instance).length}
