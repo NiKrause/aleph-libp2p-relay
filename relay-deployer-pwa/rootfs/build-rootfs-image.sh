@@ -4,7 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${APP_DIR}/.." && pwd)"
-ROOTFS_PROFILE="${ROOTFS_PROFILE:-py-libp2p}"
+ROOTFS_CONTRACT_FILE="${ROOTFS_CONTRACT_FILE:-}"
+ROOTFS_PROFILE="${ROOTFS_PROFILE:-}"
 ROOTFS_INSTALL_MODE="${ROOTFS_INSTALL_MODE:-}"
 PY_LIBP2P_DIR="${PY_LIBP2P_DIR:-${REPO_DIR}/py-libp2p}"
 ORBITDB_RELAY_PINNER_DIR="${ORBITDB_RELAY_PINNER_DIR:-}"
@@ -25,6 +26,33 @@ require curl
 require qemu-img
 require virt-customize
 require tar
+
+load_rootfs_contract() {
+  [ -n "${ROOTFS_CONTRACT_FILE}" ] || return 0
+  require python3
+  [ -f "${ROOTFS_CONTRACT_FILE}" ] || {
+    echo "Rootfs contract does not exist: ${ROOTFS_CONTRACT_FILE}" >&2
+    exit 1
+  }
+
+  eval "$(python3 "${SCRIPT_DIR}/read-rootfs-contract.py" "${ROOTFS_CONTRACT_FILE}")"
+
+  if [ -n "${ROOTFS_PROFILE}" ] && [ "${ROOTFS_PROFILE}" != "${ROOTFS_CONTRACT_PROFILE}" ]; then
+    echo "ROOTFS_PROFILE=${ROOTFS_PROFILE} conflicts with contract profile ${ROOTFS_CONTRACT_PROFILE}" >&2
+    exit 1
+  fi
+  if [ -n "${ROOTFS_INSTALL_MODE}" ] && [ "${ROOTFS_INSTALL_MODE}" != "${ROOTFS_CONTRACT_INSTALL_MODE}" ]; then
+    echo "ROOTFS_INSTALL_MODE=${ROOTFS_INSTALL_MODE} conflicts with contract install mode ${ROOTFS_CONTRACT_INSTALL_MODE}" >&2
+    exit 1
+  fi
+
+  ROOTFS_PROFILE="${ROOTFS_CONTRACT_PROFILE}"
+  ROOTFS_INSTALL_MODE="${ROOTFS_INSTALL_MODE:-${ROOTFS_CONTRACT_INSTALL_MODE}}"
+  echo "Loaded rootfs contract: ${ROOTFS_CONTRACT_PATH}"
+}
+
+load_rootfs_contract
+ROOTFS_PROFILE="${ROOTFS_PROFILE:-py-libp2p}"
 
 case "${ROOTFS_PROFILE}" in
   py-libp2p)

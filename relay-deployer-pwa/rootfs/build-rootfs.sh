@@ -5,7 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${APP_DIR}/.." && pwd)"
 OUT_DIR="${OUT_DIR:-${APP_DIR}/dist-rootfs}"
-ROOTFS_PROFILE="${ROOTFS_PROFILE:-py-libp2p}"
+ROOTFS_CONTRACT_FILE="${ROOTFS_CONTRACT_FILE:-}"
+ROOTFS_PROFILE="${ROOTFS_PROFILE:-}"
 ROOTFS_INSTALL_MODE="${ROOTFS_INSTALL_MODE:-}"
 ROOTFS_SIZE_MIB="${ROOTFS_SIZE_MIB:-20480}"
 CHANNEL="${CHANNEL:-ALEPH-CLOUDSOLUTIONS}"
@@ -14,6 +15,42 @@ SKIP_BUILD="${SKIP_BUILD:-0}"
 IPFS_ADD_URL="${IPFS_ADD_URL:-https://ipfs.aleph.cloud/api/v0/add}"
 ORBITDB_RELAY_PINNER_DIR="${ORBITDB_RELAY_PINNER_DIR:-}"
 UNIVERSAL_CONNECTIVITY_DIR="${UNIVERSAL_CONNECTIVITY_DIR:-}"
+
+require() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "Missing required command: $1" >&2
+    exit 1
+  }
+}
+
+die() {
+  echo "$*" >&2
+  exit 1
+}
+
+load_rootfs_contract() {
+  [ -n "${ROOTFS_CONTRACT_FILE}" ] || return 0
+  require python3
+  [ -f "${ROOTFS_CONTRACT_FILE}" ] || die "Rootfs contract does not exist: ${ROOTFS_CONTRACT_FILE}"
+
+  # The contract is relay-owned metadata. We load it once here so users can
+  # select a standardized profile without repeating profile/install-mode flags.
+  eval "$(python3 "${SCRIPT_DIR}/read-rootfs-contract.py" "${ROOTFS_CONTRACT_FILE}")"
+
+  if [ -n "${ROOTFS_PROFILE}" ] && [ "${ROOTFS_PROFILE}" != "${ROOTFS_CONTRACT_PROFILE}" ]; then
+    die "ROOTFS_PROFILE=${ROOTFS_PROFILE} conflicts with contract profile ${ROOTFS_CONTRACT_PROFILE}"
+  fi
+  if [ -n "${ROOTFS_INSTALL_MODE}" ] && [ "${ROOTFS_INSTALL_MODE}" != "${ROOTFS_CONTRACT_INSTALL_MODE}" ]; then
+    die "ROOTFS_INSTALL_MODE=${ROOTFS_INSTALL_MODE} conflicts with contract install mode ${ROOTFS_CONTRACT_INSTALL_MODE}"
+  fi
+
+  ROOTFS_PROFILE="${ROOTFS_CONTRACT_PROFILE}"
+  ROOTFS_INSTALL_MODE="${ROOTFS_INSTALL_MODE:-${ROOTFS_CONTRACT_INSTALL_MODE}}"
+  echo "Loaded rootfs contract: ${ROOTFS_CONTRACT_PATH}"
+}
+
+load_rootfs_contract
+ROOTFS_PROFILE="${ROOTFS_PROFILE:-py-libp2p}"
 
 case "${ROOTFS_PROFILE}" in
   py-libp2p)
@@ -62,18 +99,6 @@ case "${ROOTFS_INSTALL_MODE}" in
 esac
 
 IMAGE="${OUT_DIR}/${IMAGE_BASENAME}"
-
-require() {
-  command -v "$1" >/dev/null 2>&1 || {
-    echo "Missing required command: $1" >&2
-    exit 1
-  }
-}
-
-die() {
-  echo "$*" >&2
-  exit 1
-}
 
 resolve_rootfs_version() {
   if [ -n "${ROOTFS_VERSION:-}" ]; then
@@ -240,6 +265,11 @@ build_with_docker() {
 }
 
 required_port_forwards_json() {
+  if [ -n "${ROOTFS_CONTRACT_PORT_FORWARDS_JSON:-}" ]; then
+    printf '  "requiredPortForwards": %s,\n' "${ROOTFS_CONTRACT_PORT_FORWARDS_JSON}"
+    return
+  fi
+
   case "${ROOTFS_PROFILE}" in
     orbitdb-relay-pinner)
       cat <<'EOF'
@@ -288,17 +318,17 @@ write_manifest() {
   local rootfs_source_size_bytes=""
   local requires_bootstrap_network="false"
   local bootstrap_summary="Dependencies are preinstalled in the image."
-  local notes=""
+  local notes="${ROOTFS_CONTRACT_MANIFEST_NOTES:-}"
 
   if [ "${ROOTFS_INSTALL_MODE}" = "thin" ]; then
     requires_bootstrap_network="true"
     bootstrap_summary="First boot installs runtime packages and application dependencies. Outbound network access is required before the relay service becomes healthy."
   fi
 
-  if [ "${ROOTFS_PROFILE}" = "uc-rust-peer" ]; then
+  if [ -z "${notes}" ] && [ "${ROOTFS_PROFILE}" = "uc-rust-peer" ]; then
     notes="The rust-peer image publishes a WSS bridge on 443 for browser clients, but the upstream peer does not yet self-advertise host-remapped websocket multiaddrs. Use the mapped proxy hostname or explicit multiaddrs from deployment metadata."
   fi
-  if [ "${ROOTFS_PROFILE}" = "uc-go-peer" ]; then
+  if [ -z "${notes}" ] && [ "${ROOTFS_PROFILE}" = "uc-go-peer" ]; then
     notes="The go-peer image configures explicit external announce multiaddrs after deployment so libp2p TCP, WSS, QUIC, and WebRTC addresses use the actual Aleph host port mappings."
   fi
 
