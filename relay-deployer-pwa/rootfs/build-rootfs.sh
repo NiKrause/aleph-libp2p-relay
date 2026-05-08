@@ -8,6 +8,7 @@ OUT_DIR="${OUT_DIR:-${APP_DIR}/dist-rootfs}"
 ROOTFS_CONTRACT_FILE="${ROOTFS_CONTRACT_FILE:-}"
 ROOTFS_PROFILE="${ROOTFS_PROFILE:-}"
 ROOTFS_INSTALL_MODE="${ROOTFS_INSTALL_MODE:-}"
+ROOTFS_BUILD_DRIVER="${ROOTFS_BUILD_DRIVER:-auto}"
 ROOTFS_SIZE_MIB="${ROOTFS_SIZE_MIB:-20480}"
 CHANNEL="${CHANNEL:-ALEPH-CLOUDSOLUTIONS}"
 SKIP_UPLOAD="${SKIP_UPLOAD:-0}"
@@ -94,6 +95,16 @@ case "${ROOTFS_INSTALL_MODE}" in
   *)
     echo "Unsupported ROOTFS_INSTALL_MODE: ${ROOTFS_INSTALL_MODE}" >&2
     echo "Expected one of: thin, prebaked" >&2
+    exit 1
+    ;;
+esac
+
+case "${ROOTFS_BUILD_DRIVER}" in
+  auto|host|docker)
+    ;;
+  *)
+    echo "Unsupported ROOTFS_BUILD_DRIVER: ${ROOTFS_BUILD_DRIVER}" >&2
+    echo "Expected one of: auto, host, docker" >&2
     exit 1
     ;;
 esac
@@ -439,11 +450,30 @@ echo "Building rootfs profile: ${ROOTFS_PROFILE}"
 echo "Using install mode: ${ROOTFS_INSTALL_MODE}"
 
 if [ "${SKIP_BUILD}" != "1" ]; then
-  if command -v virt-customize >/dev/null 2>&1; then
-    build_with_host_tools
-  else
-    build_with_docker
-  fi
+  case "${ROOTFS_BUILD_DRIVER}" in
+    host)
+      if command -v virt-customize >/dev/null 2>&1; then
+        build_with_host_tools
+      else
+        die "ROOTFS_BUILD_DRIVER=host requested, but virt-customize is not available."
+      fi
+      ;;
+    docker)
+      build_with_docker
+      ;;
+    auto)
+      # GitHub-hosted runners often have libguestfs tooling installed but fail
+      # later inside supermin. Prefer the Dockerized Debian/libguestfs toolchain
+      # in CI, while keeping host builds for local Linux machines.
+      if [ "${GITHUB_ACTIONS:-}" = "true" ] && command -v docker >/dev/null 2>&1; then
+        build_with_docker
+      elif command -v virt-customize >/dev/null 2>&1; then
+        build_with_host_tools
+      else
+        build_with_docker
+      fi
+      ;;
+  esac
 else
   echo "SKIP_BUILD=1 set; reusing ${IMAGE}"
   [ -f "${IMAGE}" ] || die "SKIP_BUILD=1 requested, but rootfs image is missing: ${IMAGE}"
