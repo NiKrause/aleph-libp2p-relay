@@ -314,10 +314,7 @@ EOF
     { "port": 22, "tcp": true, "udp": false, "purpose": "SSH" },
     { "port": 80, "tcp": true, "udp": false, "purpose": "Temporary setup endpoint" },
     { "port": 443, "tcp": true, "udp": false, "purpose": "Caddy HTTPS and WSS proxy" },
-    { "port": 9095, "tcp": true, "udp": false, "purpose": "libp2p TCP" },
-    { "port": 9096, "tcp": true, "udp": false, "purpose": "libp2p WSS" },
-    { "port": 9097, "tcp": false, "udp": true, "purpose": "QUIC and WebTransport" },
-    { "port": 9098, "tcp": false, "udp": true, "purpose": "WebRTC direct" }
+    { "port": 9095, "tcp": true, "udp": true, "purpose": "libp2p raw TCP and UDP transports" }
   ],
 EOF
       ;;
@@ -340,7 +337,7 @@ write_manifest() {
     notes="The rust-peer image publishes a WSS bridge on 443 for browser clients, but the upstream peer does not yet self-advertise host-remapped websocket multiaddrs. Use the mapped proxy hostname or explicit multiaddrs from deployment metadata."
   fi
   if [ -z "${notes}" ] && [ "${ROOTFS_PROFILE}" = "uc-go-peer" ]; then
-    notes="The go-peer image configures explicit external announce multiaddrs after deployment so libp2p TCP, WSS, QUIC, and WebRTC addresses use the actual Aleph host port mappings."
+    notes="The go-peer image keeps the relay on internal port 9095, then advertises raw TCP on external port 80, secure WebSocket on 443 via Caddy, and a single externally mapped UDP port for QUIC, WebTransport, and WebRTC-direct."
   fi
 
   if [ -f "${OUT_DIR}/ipfs-add-response.jsonl" ]; then

@@ -4,19 +4,20 @@ set -euo pipefail
 ENV_FILE="${ENV_FILE:-/etc/default/uc-go-peer}"
 READY_FILE="${READY_FILE:-/etc/default/uc-go-peer.ready}"
 AUTOTLS_READY_FILE="${AUTOTLS_READY_FILE:-/etc/default/uc-go-peer.autotls-ready}"
+AUTOTLS_ZONE_FILE="${AUTOTLS_ZONE_FILE:-/etc/default/uc-go-peer.autotls-zone}"
+AUTOTLS_HOSTS_FILE="${AUTOTLS_HOSTS_FILE:-/etc/default/uc-go-peer.autotls-hosts}"
 AUTOTLS_CADDY_READY_FILE="${AUTOTLS_CADDY_READY_FILE:-/etc/default/uc-go-peer.caddy-ready}"
 SERVICE_NAME="${SERVICE_NAME:-uc-go-peer.service}"
 AUTOTLS_REFRESH_SERVICE="${AUTOTLS_REFRESH_SERVICE:-uc-go-peer-autotls-refresh.service}"
 CADDY_SERVICE="${CADDY_SERVICE:-caddy.service}"
+BOOTSTRAP_SERVICE="${BOOTSTRAP_SERVICE:-uc-go-peer-bootstrap.service}"
 P2P_FORGE_DOMAIN="${P2P_FORGE_DOMAIN:-libp2p.direct}"
 PUBLIC_IPV4=""
 PUBLIC_IPV6=""
-TCP_PORT=""
-WS_PORT=""
+TCP_PORT="80"
+WS_PORT="443"
 PROXY_HOSTNAME=""
-QUIC_PORT=""
-WEBTRANSPORT_PORT=""
-WEBRTC_PORT=""
+UDP_PORT=""
 START_SERVICE=1
 
 usage() {
@@ -25,9 +26,10 @@ Usage:
   uc-go-peer-configure.sh \
     --public-ipv4 <ip> \
     [--public-ipv6 <ipv6>] \
-    --tcp-port <host-port> \
-    --ws-port <host-port> \
     [--proxy-hostname <hostname>] \
+    [--tcp-port <host-port>] \
+    [--ws-port <host-port>] \
+    [--udp-port <host-port>] \
     [--quic-port <host-port>] \
     [--webtransport-port <host-port>] \
     [--webrtc-port <host-port>] \
@@ -64,20 +66,24 @@ while [ "$#" -gt 0 ]; do
       WS_PORT="${2:-}"
       shift 2
       ;;
+    --udp-port)
+      UDP_PORT="${2:-}"
+      shift 2
+      ;;
     --proxy-hostname)
       PROXY_HOSTNAME="${2:-}"
       shift 2
       ;;
     --quic-port)
-      QUIC_PORT="${2:-}"
+      UDP_PORT="${2:-}"
       shift 2
       ;;
     --webtransport-port)
-      WEBTRANSPORT_PORT="${2:-}"
+      UDP_PORT="${2:-}"
       shift 2
       ;;
     --webrtc-port)
-      WEBRTC_PORT="${2:-}"
+      UDP_PORT="${2:-}"
       shift 2
       ;;
     --no-start)
@@ -96,41 +102,34 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ -z "${PUBLIC_IPV4}" ] || [ -z "${TCP_PORT}" ] || [ -z "${WS_PORT}" ]; then
+if [ -z "${PUBLIC_IPV4}" ]; then
   usage >&2
   exit 1
 fi
 
 touch "${ENV_FILE}"
-rm -f "${AUTOTLS_READY_FILE}" "${AUTOTLS_CADDY_READY_FILE}"
-
-if [ -z "${QUIC_PORT}" ]; then
-  QUIC_PORT="9097"
-fi
-if [ -z "${WEBTRANSPORT_PORT}" ]; then
-  WEBTRANSPORT_PORT="${QUIC_PORT}"
-fi
+rm -f "${AUTOTLS_READY_FILE}" "${AUTOTLS_ZONE_FILE}" "${AUTOTLS_HOSTS_FILE}" "${AUTOTLS_CADDY_READY_FILE}"
 
 announce=(
   "/ip4/${PUBLIC_IPV4}/tcp/${TCP_PORT}"
-  "/ip4/${PUBLIC_IPV4}/tcp/${WS_PORT}/tls/sni/*.${P2P_FORGE_DOMAIN}/ws"
-  "/ip4/${PUBLIC_IPV4}/udp/${QUIC_PORT}/quic-v1"
-  "/ip4/${PUBLIC_IPV4}/udp/${WEBTRANSPORT_PORT}/quic-v1/webtransport"
 )
 
-if [ -n "${WEBRTC_PORT}" ]; then
-  announce+=("/ip4/${PUBLIC_IPV4}/udp/${WEBRTC_PORT}/webrtc-direct")
+if [ -n "${UDP_PORT}" ]; then
+  announce+=(
+    "/ip4/${PUBLIC_IPV4}/udp/${UDP_PORT}/quic-v1"
+    "/ip4/${PUBLIC_IPV4}/udp/${UDP_PORT}/quic-v1/webtransport"
+    "/ip4/${PUBLIC_IPV4}/udp/${UDP_PORT}/webrtc-direct"
+  )
 fi
 
 if [ -n "${PUBLIC_IPV6}" ]; then
-  announce+=(
-    "/ip6/${PUBLIC_IPV6}/tcp/${TCP_PORT}"
-    "/ip6/${PUBLIC_IPV6}/tcp/${WS_PORT}/tls/sni/*.${P2P_FORGE_DOMAIN}/ws"
-    "/ip6/${PUBLIC_IPV6}/udp/${QUIC_PORT}/quic-v1"
-    "/ip6/${PUBLIC_IPV6}/udp/${WEBTRANSPORT_PORT}/quic-v1/webtransport"
-  )
-  if [ -n "${WEBRTC_PORT}" ]; then
-    announce+=("/ip6/${PUBLIC_IPV6}/udp/${WEBRTC_PORT}/webrtc-direct")
+  announce+=("/ip6/${PUBLIC_IPV6}/tcp/${TCP_PORT}")
+  if [ -n "${UDP_PORT}" ]; then
+    announce+=(
+      "/ip6/${PUBLIC_IPV6}/udp/${UDP_PORT}/quic-v1"
+      "/ip6/${PUBLIC_IPV6}/udp/${UDP_PORT}/quic-v1/webtransport"
+      "/ip6/${PUBLIC_IPV6}/udp/${UDP_PORT}/webrtc-direct"
+    )
   fi
 fi
 
@@ -144,10 +143,11 @@ write_env_var "EXTERNAL_RELAY_WS_PORT" "${WS_PORT}"
 if [ -n "${PROXY_HOSTNAME}" ]; then
   write_env_var "PROXY_HOSTNAME" "${PROXY_HOSTNAME}"
 fi
-write_env_var "EXTERNAL_RELAY_QUIC_PORT" "${QUIC_PORT}"
-write_env_var "EXTERNAL_RELAY_WEBTRANSPORT_PORT" "${WEBTRANSPORT_PORT}"
-if [ -n "${WEBRTC_PORT}" ]; then
-  write_env_var "EXTERNAL_RELAY_WEBRTC_PORT" "${WEBRTC_PORT}"
+if [ -n "${UDP_PORT}" ]; then
+  write_env_var "EXTERNAL_RELAY_UDP_PORT" "${UDP_PORT}"
+  write_env_var "EXTERNAL_RELAY_QUIC_PORT" "${UDP_PORT}"
+  write_env_var "EXTERNAL_RELAY_WEBTRANSPORT_PORT" "${UDP_PORT}"
+  write_env_var "EXTERNAL_RELAY_WEBRTC_PORT" "${UDP_PORT}"
 fi
 write_env_var "LIBP2P_ANNOUNCE_ADDRS" "${announce_value}"
 touch "${READY_FILE}"
@@ -161,6 +161,7 @@ if [ "${START_SERVICE}" -eq 1 ]; then
   if [ -z "${PROXY_HOSTNAME}" ]; then
     systemctl stop "${CADDY_SERVICE}" || true
   fi
+  systemctl stop "${BOOTSTRAP_SERVICE}" || true
 fi
 
 printf 'Configured LIBP2P_ANNOUNCE_ADDRS=%s\n' "${announce_value}"

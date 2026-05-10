@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
@@ -11,6 +12,7 @@ from urllib.parse import urlsplit
 ENV_FILE = os.environ.get("ENV_FILE", "/etc/default/uc-go-peer")
 READY_FILE = os.environ.get("READY_FILE", "/etc/default/uc-go-peer.ready")
 CONFIGURE_SCRIPT = "/usr/local/sbin/uc-go-peer-configure.sh"
+BOOTSTRAP_SERVICE = os.environ.get("BOOTSTRAP_SERVICE", "uc-go-peer-bootstrap.service")
 
 
 def _cors_headers(handler: BaseHTTPRequestHandler) -> None:
@@ -100,29 +102,24 @@ class Handler(BaseHTTPRequestHandler):
             public_ipv6 = payload.get("public_ipv6")
             if public_ipv6 is not None:
                 public_ipv6 = str(ipaddress.ip_address(public_ipv6))
-            tcp_port = _validate_port(payload.get("tcp_port"), "tcp_port")
-            ws_port = _validate_port(payload.get("ws_port"), "ws_port")
             proxy_hostname = _validate_proxy_hostname(payload.get("proxy_url"))
+            udp_port = payload.get("udp_port")
             quic_port = payload.get("quic_port")
             webrtc_port = payload.get("webrtc_port")
             args = [
                 CONFIGURE_SCRIPT,
                 "--public-ipv4",
                 public_ipv4,
-                "--tcp-port",
-                tcp_port,
-                "--ws-port",
-                ws_port,
             ]
             if proxy_hostname is not None:
                 args.extend(["--proxy-hostname", proxy_hostname])
             if public_ipv6 is not None:
                 args.extend(["--public-ipv6", public_ipv6])
-            if quic_port is not None:
-                validated_quic = _validate_port(quic_port, "quic_port")
-                args.extend(["--quic-port", validated_quic, "--webtransport-port", validated_quic])
-            if webrtc_port is not None:
-                args.extend(["--webrtc-port", _validate_port(webrtc_port, "webrtc_port")])
+            udp_candidate = udp_port if udp_port is not None else quic_port
+            if udp_candidate is None:
+                udp_candidate = webrtc_port
+            if udp_candidate is not None:
+                args.extend(["--udp-port", _validate_port(udp_candidate, "udp_port")])
         except ValueError as error:
             self._send_json(400, {"status": "bad-request", "error": str(error)})
             return
@@ -141,6 +138,13 @@ class Handler(BaseHTTPRequestHandler):
 
         self._send_json(200, {"status": "configured", "stdout": result.stdout.strip()})
         threading.Thread(target=self.server.shutdown, daemon=True).start()  # type: ignore[arg-type]
+        threading.Thread(target=_stop_bootstrap_service, daemon=True).start()
+
+
+def _stop_bootstrap_service() -> None:
+    # Give the HTTP response a brief head start, then stop the temporary setup service.
+    time.sleep(1)
+    subprocess.run(["systemctl", "stop", BOOTSTRAP_SERVICE], check=False)
 
 
 def main() -> None:

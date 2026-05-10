@@ -1,18 +1,14 @@
 {
   "profile": "uc-go-peer",
-  "version": "uc-go-peer-v0.1.0",
+  "version": "uc-go-peer-git-20260508-fee0746",
   "rootfsInstallStrategy": "prebaked",
   "requiresBootstrapNetwork": false,
   "bootstrapSummary": "Dependencies are preinstalled in the image.",
-  "rootfsSourceSizeBytes": 2285521700,  "requiredPortForwards": [
-    { "port": 22, "tcp": true, "udp": false, "purpose": "SSH" },
-    { "port": 80, "tcp": true, "udp": false, "purpose": "Temporary setup endpoint" },
-    { "port": 9095, "tcp": true, "udp": false, "purpose": "libp2p TCP" },
-    { "port": 9096, "tcp": true, "udp": false, "purpose": "libp2p WSS" },
-    { "port": 9097, "tcp": false, "udp": true, "purpose": "QUIC and WebTransport" },
-    { "port": 9098, "tcp": false, "udp": true, "purpose": "WebRTC direct" }
-  ],  "rootfsItemHash": "8cb33584964c0771507519ab759d9d429b19801dc045c7aceb399c770f251ad8",
+  "rootfsSourceSizeBytes": 699369970,
+  "requiredPortForwards": [{"port":22,"tcp":true,"udp":false,"purpose":"SSH"},{"port":80,"tcp":true,"udp":false,"purpose":"Temporary setup endpoint"},{"port":443,"tcp":true,"udp":false,"purpose":"Caddy HTTPS and WSS proxy"},{"port":9095,"tcp":true,"udp":true,"purpose":"libp2p raw TCP and UDP transports"}],
+  "rootfsCid": "QmV9W9QwLqCsaG5WWB7Vtpkxjx6Eh7kjZhdNALTiAnJJi3",
+  "rootfsItemHash": "aa14200818e0491e507e6d5620524b5dec7631050ef5858dc060eab4b143de43",
   "rootfsSizeMiB": 20480,
-  "createdAt": "2026-05-05T10:34:01Z",
-  "notes": "The go-peer image configures explicit external announce multiaddrs after deployment so libp2p TCP, WSS, QUIC, and WebRTC addresses use the actual Aleph host port mappings."
+  "createdAt": "2026-05-08T10:59:30Z",
+  "notes": "The go-peer image keeps the relay on internal port 9095, then advertises raw TCP on external port 80, secure WebSocket on 443 via Caddy, and a single externally mapped UDP port for QUIC, WebTransport, and WebRTC-direct."
 }
