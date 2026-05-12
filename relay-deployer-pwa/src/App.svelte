@@ -1018,8 +1018,7 @@
 
     if (profile === 'uc-go-peer') {
       const relayPort = networking?.mapped_ports?.['9095']?.host
-      const wsPort = networking?.mapped_ports?.['443']?.host
-      if (!relayPort || !wsPort) return null
+      if (!relayPort) return null
 
       return {
         profile,
@@ -1028,8 +1027,8 @@
         publicIpv6,
         setupPort,
         tcpPort: relayPort,
-        wsPort,
-        proxyUrl,
+        wsPort: relayPort,
+        proxyUrl: null,
         metricsPort: null,
         metricsHttpsPort: null,
         webrtcPort: relayPort,
