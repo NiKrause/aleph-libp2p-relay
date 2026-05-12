@@ -1017,9 +1017,9 @@
     }
 
     if (profile === 'uc-go-peer') {
-      const tcpPort = networking?.mapped_ports?.['9095']?.host
-      const wsPort = networking?.mapped_ports?.['9096']?.host
-      if (!tcpPort || !wsPort) return null
+      const relayPort = networking?.mapped_ports?.['9095']?.host
+      const wsPort = networking?.mapped_ports?.['443']?.host
+      if (!relayPort || !wsPort) return null
 
       return {
         profile,
@@ -1027,13 +1027,13 @@
         hostIpv4,
         publicIpv6,
         setupPort,
-        tcpPort,
+        tcpPort: relayPort,
         wsPort,
         proxyUrl,
         metricsPort: null,
         metricsHttpsPort: null,
-        webrtcPort: networking?.mapped_ports?.['9098']?.host ?? null,
-        quicPort: networking?.mapped_ports?.['9097']?.host ?? null
+        webrtcPort: relayPort,
+        quicPort: relayPort
       }
     }
 
