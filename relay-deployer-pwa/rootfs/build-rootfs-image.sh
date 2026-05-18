@@ -248,8 +248,8 @@ case "${ROOTFS_PROFILE}" in
 
     uc_go_customize_args=(
       -a "${IMAGE}"
-      --mkdir /opt/go-peer
-      --mkdir /var/lib/uc-go-peer
+      --mkdir "${ROOTFS_CONTRACT_INSTALL_DIR}"
+      --mkdir "${ROOTFS_CONTRACT_DATA_DIR}"
       --mkdir "${ROOTFS_CONTRACT_BINARY_DIR}"
       --copy-in "${APP_TAR}:/opt"
       --copy-in "${SCRIPT_DIR}/uc-go-peer-bootstrap.sh:/usr/local/sbin"
@@ -264,12 +264,12 @@ case "${ROOTFS_PROFILE}" in
       --run-command "chmod 0755 /usr/local/sbin/uc-go-peer-configure.sh"
       --run-command "chmod 0755 /usr/local/sbin/uc-go-peer-autotls-refresh.py"
       --run-command "chmod 0755 /usr/local/sbin/uc-go-peer-setup-server.py"
-      --run-command "INSTALL_DIR=/opt/go-peer APP_BINARY=${ROOTFS_CONTRACT_BINARY_PATH} DATA_DIR=/var/lib/uc-go-peer ENV_FILE=/etc/default/uc-go-peer SERVICE_USER=uc-go-peer /usr/local/sbin/uc-go-peer-bootstrap.sh base"
-      --run-command "INSTALL_DIR=/opt/go-peer APP_BINARY=${ROOTFS_CONTRACT_BINARY_PATH} DATA_DIR=/var/lib/uc-go-peer ENV_FILE=/etc/default/uc-go-peer SERVICE_USER=uc-go-peer /usr/local/sbin/uc-go-peer-bootstrap.sh build"
-      --run-command "INSTALL_DIR=/opt/go-peer APP_BINARY=${ROOTFS_CONTRACT_BINARY_PATH} DATA_DIR=/var/lib/uc-go-peer ENV_FILE=/etc/default/uc-go-peer SERVICE_USER=uc-go-peer /usr/local/sbin/uc-go-peer-bootstrap.sh finalize"
-      --run-command "systemctl enable uc-go-peer-bootstrap.service"
-      --run-command "systemctl enable uc-go-peer-autotls-refresh.service"
-      --run-command "systemctl enable uc-go-peer.service"
+      --run-command "INSTALL_DIR=${ROOTFS_CONTRACT_INSTALL_DIR} APP_BINARY=${ROOTFS_CONTRACT_BINARY_PATH} DATA_DIR=${ROOTFS_CONTRACT_DATA_DIR} ENV_FILE=${ROOTFS_CONTRACT_ENV_FILE} SERVICE_USER=uc-go-peer /usr/local/sbin/uc-go-peer-bootstrap.sh base"
+      --run-command "INSTALL_DIR=${ROOTFS_CONTRACT_INSTALL_DIR} APP_BINARY=${ROOTFS_CONTRACT_BINARY_PATH} DATA_DIR=${ROOTFS_CONTRACT_DATA_DIR} ENV_FILE=${ROOTFS_CONTRACT_ENV_FILE} SERVICE_USER=uc-go-peer /usr/local/sbin/uc-go-peer-bootstrap.sh build"
+      --run-command "INSTALL_DIR=${ROOTFS_CONTRACT_INSTALL_DIR} APP_BINARY=${ROOTFS_CONTRACT_BINARY_PATH} DATA_DIR=${ROOTFS_CONTRACT_DATA_DIR} ENV_FILE=${ROOTFS_CONTRACT_ENV_FILE} SERVICE_USER=uc-go-peer /usr/local/sbin/uc-go-peer-bootstrap.sh finalize"
+      --run-command "systemctl enable ${ROOTFS_CONTRACT_BOOTSTRAP_SERVICE}"
+      --run-command "systemctl enable ${ROOTFS_CONTRACT_AUTOTLS_SERVICE}"
+      --run-command "systemctl enable ${ROOTFS_CONTRACT_MAIN_SERVICE}"
       --run-command "rm -f /opt/$(basename "${APP_TAR}")"
     )
 
