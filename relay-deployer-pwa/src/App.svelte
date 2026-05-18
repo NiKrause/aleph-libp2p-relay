@@ -983,7 +983,7 @@
   function orbitdbSetupTarget(instance: InstanceMessage) {
     const profile = rootfsState.manifest?.profile
     if (profile !== 'orbitdb-relay-pinner' && profile !== 'uc-rust-peer' && profile !== 'uc-go-peer') return null
-    if (instance.content?.rootfs?.parent?.ref !== rootfsState.manifest.rootfsItemHash) return null
+    if (!rootfsState.manifest || instance.content?.rootfs?.parent?.ref !== rootfsState.manifest.rootfsItemHash) return null
     const details = instanceDetails[instance.item_hash]
     const networking = details?.execution?.networking
     const hostIpv4 = networking?.host_ipv4

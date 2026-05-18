@@ -14,6 +14,9 @@ importers:
       '@aleph-sdk/ethereum':
         specifier: ^1.8.0
         version: 1.8.0(@aleph-sdk/account@1.7.4(@aleph-sdk/core@1.7.4))(@aleph-sdk/core@1.7.4)(@aleph-sdk/evm@1.8.0(@aleph-sdk/account@1.7.4(@aleph-sdk/core@1.7.4))(@aleph-sdk/core@1.7.4)(ethers@5.8.0))(ethers@5.8.0)
+      '@le-space/rootfs':
+        specifier: ^0.1.20
+        version: 0.1.20
       js-sha3:
         specifier: ^0.9.3
         version: 0.9.3
@@ -916,6 +919,9 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@le-space/rootfs@0.1.20':
+    resolution: {integrity: sha512-F0H/w88q6g/7rUdBCUYCZsP4K+INQEH7UmgfwSNHIJRppXF7VjIXLDR8efuwb7oYffpkt8CSUSsRnnySjlLQKQ==}
 
   '@metamask/abi-utils@2.0.4':
     resolution: {integrity: sha512-StnIgUB75x7a7AgUhiaUZDpCsqGp7VkNnZh2XivXkJ6mPkE83U8ARGQj5MbRis7VJY8BC5V1AbB1fjdh0hupPQ==}
@@ -2597,6 +2603,7 @@ packages:
 
   uuid@9.0.1:
     resolution: {integrity: sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
   vite-node@3.2.4:
@@ -3947,6 +3954,8 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@le-space/rootfs@0.1.20': {}
 
   '@metamask/abi-utils@2.0.4':
     dependencies:
