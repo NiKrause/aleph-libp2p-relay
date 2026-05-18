@@ -13,7 +13,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@le-space/browser": "^0.1.28",
+    "@le-space/browser": "^0.1.29",
     "@le-space/rootfs": "^0.1.20",
     "@le-space/core": "^0.1.20",
     "@aleph-sdk/client": "^1.7.4",

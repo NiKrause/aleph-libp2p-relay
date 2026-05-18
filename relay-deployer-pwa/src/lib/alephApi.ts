@@ -10,6 +10,7 @@ export {
   fetchMessageEnvelope,
   fetchSchedulerAllocation,
   inspectDeploymentResult,
+  notifyCrnAllocation,
   normalizeMessageStatus,
   waitForDeploymentResult
 } from '@le-space/browser'
@@ -204,42 +205,6 @@ async function fetch2n6WebAccessUrl(instanceItemHash: string): Promise<string | 
       error: message
     })
     return null
-  }
-}
-
-export async function notifyCrnAllocation(
-  crnUrl: string,
-  itemHash: string
-): Promise<{ status: 'confirmed' | 'unconfirmed' }> {
-  const normalizedCrnUrl = crnUrl.replace(/\/+$/, '')
-
-  try {
-    const response = await fetchWithTimeout(`${normalizedCrnUrl}/control/allocation/notify`, {
-      method: 'POST',
-      headers: {
-        // text/plain keeps the request "simple" in browsers, which avoids a
-        // preflight even on CRNs that do not implement OPTIONS properly.
-        'content-type': 'text/plain;charset=UTF-8'
-      },
-      body: JSON.stringify({ instance: itemHash }),
-      mode: 'cors'
-    })
-
-    if (!response.ok) {
-      const responseText = await response.text().catch(() => '')
-      throw new Error(`CRN allocation notify failed: ${response.status}${responseText ? ` ${responseText}` : ''}`)
-    }
-
-    return { status: 'confirmed' }
-  } catch (error) {
-    if (isUnconfirmedNetworkError(error)) {
-      // The browser can still send the POST before CORS blocks JS from reading
-      // the response, so surface this as an unconfirmed request instead of a
-      // hard failure.
-      return { status: 'unconfirmed' }
-    }
-
-    throw error
   }
 }
 
