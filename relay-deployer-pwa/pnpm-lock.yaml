@@ -14,6 +14,9 @@ importers:
       '@aleph-sdk/ethereum':
         specifier: ^1.8.0
         version: 1.8.0(@aleph-sdk/account@1.7.4(@aleph-sdk/core@1.7.4))(@aleph-sdk/core@1.7.4)(@aleph-sdk/evm@1.8.0(@aleph-sdk/account@1.7.4(@aleph-sdk/core@1.7.4))(@aleph-sdk/core@1.7.4)(ethers@5.8.0))(ethers@5.8.0)
+      '@le-space/core':
+        specifier: ^0.1.20
+        version: 0.1.20
       '@le-space/rootfs':
         specifier: ^0.1.20
         version: 0.1.20
@@ -920,8 +923,14 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
+  '@le-space/core@0.1.20':
+    resolution: {integrity: sha512-Ird2/MqXUZPn5qTv1FX4saQ78CEboaynoXNW/7kc47JhuLr95Eok1Xr7zoZ6htQ7+H6qwvk5eXudW+wejzIVMA==}
+
   '@le-space/rootfs@0.1.20':
     resolution: {integrity: sha512-F0H/w88q6g/7rUdBCUYCZsP4K+INQEH7UmgfwSNHIJRppXF7VjIXLDR8efuwb7oYffpkt8CSUSsRnnySjlLQKQ==}
+
+  '@le-space/shared-types@0.1.20':
+    resolution: {integrity: sha512-GK+AYFmRVZOQWQ7rdrd60w3/LVnhVzFb1RQ32n+Awy8WIRj2T6YtqNRGno3ku4jjTTVpm+8eW57bsW5qn1hYIQ==}
 
   '@metamask/abi-utils@2.0.4':
     resolution: {integrity: sha512-StnIgUB75x7a7AgUhiaUZDpCsqGp7VkNnZh2XivXkJ6mPkE83U8ARGQj5MbRis7VJY8BC5V1AbB1fjdh0hupPQ==}
@@ -3955,7 +3964,13 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
+  '@le-space/core@0.1.20':
+    dependencies:
+      '@le-space/shared-types': 0.1.20
+
   '@le-space/rootfs@0.1.20': {}
+
+  '@le-space/shared-types@0.1.20': {}
 
   '@metamask/abi-utils@2.0.4':
     dependencies:

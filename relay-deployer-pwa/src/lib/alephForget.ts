@@ -1,3 +1,7 @@
+import {
+  createUnsignedForgetMessage as createSharedUnsignedForgetMessage,
+  normalizeBroadcastStatus
+} from '@le-space/core'
 import { ALEPH_API_HOST, ALEPH_DEFAULT_CHANNEL } from './config'
 import { broadcastAlephMessage } from './alephApi'
 import { sha256Hex } from './crypto'
@@ -25,18 +29,28 @@ export async function createUnsignedForgetMessage(args: {
   channel?: string
   now?: number
 }): Promise<Omit<AlephBroadcastMessage, 'signature'>> {
-  const itemContent = JSON.stringify(args.content)
-  const itemHash = await sha256Hex(itemContent)
+  const sharedMessage = await createSharedUnsignedForgetMessage({
+    sender: args.sender,
+    hashes: args.content.hashes,
+    aggregates: args.content.aggregates,
+    reason: args.content.reason,
+    hasher: sha256Hex,
+    channel: args.channel ?? ALEPH_DEFAULT_CHANNEL,
+    now: args.content.time
+  })
+
+  const normalizedContent = JSON.parse(sharedMessage.item_content) as AlephForgetContent
+  if (Array.isArray(normalizedContent.aggregates) && normalizedContent.aggregates.length === 0) {
+    delete normalizedContent.aggregates
+  }
+
+  const itemContent = JSON.stringify(normalizedContent)
 
   return {
-    sender: args.sender,
-    chain: 'ETH',
-    type: 'FORGET',
-    item_hash: itemHash,
-    item_type: 'inline',
+    ...sharedMessage,
     item_content: itemContent,
-    time: args.now ?? Date.now() / 1000,
-    channel: args.channel ?? ALEPH_DEFAULT_CHANNEL
+    item_hash: await sha256Hex(itemContent),
+    time: args.now ?? Date.now() / 1000
   }
 }
 
@@ -49,17 +63,6 @@ export async function signForgetMessage(
     ...unsignedMessage,
     signature: signature.startsWith('0x') ? signature : `0x${signature}`
   }
-}
-
-function normalizeStatus(httpStatus: number, responseStatus: unknown): MessageStatus {
-  if (httpStatus === 202) return 'pending'
-  if (typeof responseStatus !== 'string') return 'unknown'
-
-  const normalized = responseStatus.toLowerCase()
-  if (normalized === 'processed' || normalized === 'pending' || normalized === 'rejected') {
-    return normalized
-  }
-  return 'unknown'
 }
 
 function normalizeSdkStatus(error: unknown): MessageStatus {
@@ -91,7 +94,7 @@ export async function deleteInstance(args: {
     })
     const message = await signForgetMessage(unsignedMessage)
     const { response, httpStatus } = await broadcastAlephMessage(message, ALEPH_API_HOST, false)
-    const status = normalizeStatus(httpStatus, response.message_status)
+    const status = normalizeBroadcastStatus(httpStatus, response.message_status)
 
     return {
       itemHash: message.item_hash,
