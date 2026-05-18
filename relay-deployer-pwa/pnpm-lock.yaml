@@ -15,8 +15,8 @@ importers:
         specifier: ^1.8.0
         version: 1.8.0(@aleph-sdk/account@1.7.4(@aleph-sdk/core@1.7.4))(@aleph-sdk/core@1.7.4)(@aleph-sdk/evm@1.8.0(@aleph-sdk/account@1.7.4(@aleph-sdk/core@1.7.4))(@aleph-sdk/core@1.7.4)(ethers@5.8.0))(ethers@5.8.0)
       '@le-space/browser':
-        specifier: ^0.1.29
-        version: 0.1.29
+        specifier: ^0.1.30
+        version: 0.1.30
       '@le-space/core':
         specifier: ^0.1.20
         version: 0.1.20
@@ -926,8 +926,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@le-space/browser@0.1.29':
-    resolution: {integrity: sha512-Xj13Db6c0ROzUyy3brbBg3VMKN5aXgtuMVPJ9Y/FWwqmrPbTSzr8QX1nQsDPRnhJ3NZs8LmLYZirjgetmGboyA==}
+  '@le-space/browser@0.1.30':
+    resolution: {integrity: sha512-YTZJAujFhyC/f769dvoMCUuAPpM9CLNKCIiRZTbG2z5gJI2Q2ri7QtD5YYFTtOCB4/CO3qfWAaNUttQULR9rWw==}
 
   '@le-space/core@0.1.20':
     resolution: {integrity: sha512-Ird2/MqXUZPn5qTv1FX4saQ78CEboaynoXNW/7kc47JhuLr95Eok1Xr7zoZ6htQ7+H6qwvk5eXudW+wejzIVMA==}
@@ -3970,7 +3970,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@le-space/browser@0.1.29': {}
+  '@le-space/browser@0.1.30': {}
 
   '@le-space/core@0.1.20':
     dependencies:

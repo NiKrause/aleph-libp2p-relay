@@ -3,6 +3,7 @@ import { fetchMessageEnvelope, fetchSchedulerAllocation, normalizeMessageStatus 
 export {
   broadcastAlephMessage,
   broadcastInstanceMessage,
+  configureOrbitdbRelaySetup,
   createAlephBrowserClient,
   fetchBalance,
   fetchCrns,
@@ -80,11 +81,6 @@ type TwoN6HashLookupPayload = {
   url?: unknown
   ipv6?: unknown
   active?: unknown
-}
-
-function isUnconfirmedNetworkError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
-  return error instanceof TypeError || message.includes('Failed to fetch') || message.includes('Request timed out')
 }
 
 function asString(value: unknown): string | null {
@@ -205,59 +201,6 @@ async function fetch2n6WebAccessUrl(instanceItemHash: string): Promise<string | 
       error: message
     })
     return null
-  }
-}
-
-export async function configureOrbitdbRelaySetup(args: {
-  hostIpv4: string
-  publicIpv6?: string | null
-  setupPort: number
-  tcpPort: number
-  wsPort: number
-  proxyUrl?: string | null
-  metricsPort?: number | null
-  metricsHttpsPort?: number | null
-  webrtcPort?: number | null
-  quicPort?: number | null
-}): Promise<{ status: 'configured' | 'unconfirmed' }> {
-  const targetUrl = `http://${args.hostIpv4}:${args.setupPort}/configure`
-
-  try {
-    const response = await fetchWithTimeout(
-      targetUrl,
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'text/plain;charset=UTF-8'
-        },
-        body: JSON.stringify({
-          public_ipv4: args.hostIpv4,
-          public_ipv6: args.publicIpv6 ?? undefined,
-          tcp_port: args.tcpPort,
-          ws_port: args.wsPort,
-          proxy_url: args.proxyUrl ?? undefined,
-          metrics_port: args.metricsPort ?? undefined,
-          metrics_https_port: args.metricsHttpsPort ?? undefined,
-          webrtc_port: args.webrtcPort ?? undefined,
-          quic_port: args.quicPort ?? undefined
-        }),
-        mode: 'cors'
-      },
-      30000
-    )
-
-    if (!response.ok) {
-      const responseText = await response.text().catch(() => '')
-      throw new Error(`Relay setup request failed: ${response.status}${responseText ? ` ${responseText}` : ''}`)
-    }
-
-    return { status: 'configured' }
-  } catch (error) {
-    if (isUnconfirmedNetworkError(error)) {
-      return { status: 'unconfirmed' }
-    }
-
-    throw error
   }
 }
 
