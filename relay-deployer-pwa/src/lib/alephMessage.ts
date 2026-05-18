@@ -1,12 +1,25 @@
-import { ALEPH_BASE_ROOTFS_ITEM_HASHES, ALEPH_API_HOST, ALEPH_DEFAULT_CHANNEL } from './config'
+import {
+  createUnsignedInstanceMessage as createSharedUnsignedInstanceMessage,
+  normalizeBroadcastStatus,
+  signAlephMessage,
+  signaturePayload
+} from '@le-space/core'
+export { signaturePayload } from '@le-space/core'
+import {
+  ALEPH_BASE_ROOTFS_ITEM_HASHES,
+  ALEPH_API_HOST,
+  ALEPH_DEFAULT_CHANNEL,
+  PREPAID_RESERVATION_TTL_SECONDS
+} from './config'
 import { broadcastAlephMessage } from './alephApi'
-import { sha256Hex } from './crypto'
+import { keccak256Hex, sha256Hex } from './crypto'
 import { createReleaseMetadata, normalizeSshPublicKey, tierSpec } from './deployment'
 import { personalSign } from './wallet'
 import type {
   AlephBroadcastMessage,
   AlephInstanceContent,
   Crn,
+  DeploymentIntentEnvelope,
   DeploymentForm,
   DeploymentResult,
   InstancePricing,
@@ -83,45 +96,76 @@ export async function createUnsignedInstanceMessage(args: {
   channel?: string
   now?: number
 }): Promise<Omit<AlephBroadcastMessage, 'signature'>> {
-  const itemContent = JSON.stringify(args.content)
-  const itemHash = await sha256Hex(itemContent)
-
-  return {
+  return createSharedUnsignedInstanceMessage({
     sender: args.sender,
-    chain: 'ETH',
-    type: 'INSTANCE',
-    item_hash: itemHash,
-    item_type: 'inline',
-    item_content: itemContent,
-    time: args.now ?? Date.now() / 1000,
-    channel: args.channel ?? ALEPH_DEFAULT_CHANNEL
-  }
+    content: args.content,
+    hasher: sha256Hex,
+    channel: args.channel ?? ALEPH_DEFAULT_CHANNEL,
+    now: args.now
+  })
 }
 
-export function signaturePayload(message: Pick<AlephBroadcastMessage, 'chain' | 'sender' | 'type' | 'item_hash'>): string {
-  return [message.chain, message.sender, message.type, message.item_hash].join('\n')
+export async function createDeploymentIntent(args: {
+  sender: string
+  form: DeploymentForm
+  manifest: RootfsManifest | null
+  pricing: InstancePricing
+  tier: Tier
+  selectedCrn?: Crn | null
+  channel?: string
+  quoteRequiredBudget?: bigint
+  expiresAt?: number
+  now?: number
+}): Promise<DeploymentIntentEnvelope> {
+  const messageTime = args.now ?? Math.floor(Date.now() / 1000)
+  const content = createInstanceContent({
+    address: args.sender,
+    form: args.form,
+    manifest: args.manifest,
+    pricing: args.pricing,
+    tier: args.tier,
+    selectedCrn: args.selectedCrn,
+    now: messageTime
+  })
+
+  const unsigned = await createUnsignedInstanceMessage({
+    sender: args.sender,
+    content,
+    channel: args.channel ?? ALEPH_DEFAULT_CHANNEL,
+    now: messageTime
+  })
+
+  const spec = tierSpec(args.pricing, args.tier)
+  const expiresAt =
+    args.expiresAt ?? Math.floor(Date.now() / 1000) + PREPAID_RESERVATION_TTL_SECONDS
+  const maxCost = (args.quoteRequiredBudget ?? 0n).toString(10)
+  const intent = {
+    ownerAddress: args.sender,
+    messageTime,
+    itemHash: unsigned.item_hash,
+    paymentType: content.payment.type,
+    rootfsRef: content.rootfs.parent.ref,
+    rootfsSizeMiB: content.rootfs.size_mib,
+    computeUnits: args.tier.compute_units,
+    vcpus: spec.vcpus,
+    memoryMiB: spec.memoryMiB,
+    crnHash: args.selectedCrn?.hash ?? null,
+    channel: unsigned.channel,
+    expiresAt,
+    maxCost
+  } as const
+
+  return {
+    intent,
+    intentHash: keccak256Hex(JSON.stringify(intent))
+  }
 }
 
 export async function signInstanceMessage(
   unsignedMessage: Omit<AlephBroadcastMessage, 'signature'>,
   signer = personalSign
 ): Promise<AlephBroadcastMessage> {
-  const signature = await signer(unsignedMessage.sender, signaturePayload(unsignedMessage))
-  return {
-    ...unsignedMessage,
-    signature: signature.startsWith('0x') ? signature : `0x${signature}`
-  }
-}
-
-function normalizeStatus(httpStatus: number, responseStatus: unknown): MessageStatus {
-  if (httpStatus === 202) return 'pending'
-  if (typeof responseStatus !== 'string') return 'unknown'
-
-  const normalized = responseStatus.toLowerCase()
-  if (normalized === 'processed' || normalized === 'pending' || normalized === 'rejected') {
-    return normalized
-  }
-  return 'unknown'
+  return signAlephMessage(unsignedMessage, signer)
 }
 
 function normalizeSdkStatus(error: unknown): MessageStatus {
@@ -138,6 +182,7 @@ export async function deployInstance(args: {
   tier: Tier
   selectedCrn?: Crn | null
   channel?: string
+  now?: number
 }): Promise<DeploymentResult> {
   const content = createInstanceContent({
     address: args.sender,
@@ -145,18 +190,20 @@ export async function deployInstance(args: {
     manifest: args.manifest,
     pricing: args.pricing,
     tier: args.tier,
-    selectedCrn: args.selectedCrn
+    selectedCrn: args.selectedCrn,
+    now: args.now
   })
 
   try {
     const unsignedMessage = await createUnsignedInstanceMessage({
       sender: args.sender,
       content,
-      channel: args.channel ?? ALEPH_DEFAULT_CHANNEL
+      channel: args.channel ?? ALEPH_DEFAULT_CHANNEL,
+      now: args.now
     })
     const message = await signInstanceMessage(unsignedMessage)
     const { response, httpStatus } = await broadcastAlephMessage(message, ALEPH_API_HOST, false)
-    const status = normalizeStatus(httpStatus, response.message_status)
+    const status = normalizeBroadcastStatus(httpStatus, response.message_status)
 
     return {
       itemHash: message.item_hash,
