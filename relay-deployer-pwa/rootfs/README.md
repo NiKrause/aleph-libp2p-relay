@@ -47,6 +47,10 @@ This builds the default `py-libp2p` image. The script:
 3. Installs the matching bootstrap and `systemd` service units.
 4. Uploads the finished image to Aleph's IPFS add endpoint and then registers it with `aleph file pin`.
 5. Writes `dist-rootfs/rootfs-manifest.json`.
+6. When the rootfs contract sets `manifest.copyTarget`, also copies the latest
+   and versioned manifest files into that consumer-facing target path.
+7. For `uc-go-peer`, the image build uses the contract-defined install, data,
+   env, binary, and service paths instead of hardcoded guest paths.
 
 Install mode options:
 
@@ -157,13 +161,41 @@ To reuse an already-built qcow2 image and only retry the IPFS/Aleph upload:
 SKIP_BUILD=1 rootfs/build-rootfs.sh
 ```
 
-Copy the generated manifest into `public/rootfs-manifest.json` before building
-the PWA:
+If the active rootfs contract sets `manifest.copyTarget`, the builder can sync
+the latest and versioned manifest automatically. Otherwise, copy the generated
+manifest into `public/rootfs-manifest.json` before building the PWA:
 
 ```bash
 cp dist-rootfs/rootfs-manifest.json public/rootfs-manifest.json
 pnpm build
 ```
+
+## uc-go-peer Runtime Defaults
+
+The current `uc-go-peer` rootfs flow assumes:
+
+- public proxy entrypoint on `443` when a proxy hostname is configured
+- native listener ports:
+  - TCP: `9095`
+  - WS backend: `9096`
+  - AutoTLS WSS: `9097`
+- contract-driven guest paths for:
+  - install dir
+  - data dir
+  - env file
+  - binary path
+  - bootstrap/main/autotls service names
+
+`read-rootfs-contract.py` now exports those paths and service names, and
+`build-rootfs-image.sh` uses them for the `uc-go-peer` image instead of relying
+on fixed `/opt/go-peer`-style paths.
+
+The temporary setup server inside the guest also exposes:
+
+- `POST /configure` to write the mapped-address runtime config
+- `GET /health` to report readiness and metadata generation state
+- `GET /metadata` to return the describe payload once the relay has started and
+  its announced/bootstrap addresses can be summarized
 
 ## Runtime Defaults
 
@@ -324,13 +356,17 @@ prefer explicit multiaddrs when using the `443` WSS proxy path.
 ### `uc-go-peer`
 
 - Temporary setup endpoint: `80`
-- Public HTTPS/WSS proxy port: `443`
-- Relay TCP/WSS/QUIC/WebRTC ports: `9095`, `9096`, `9097`, `9098`
+- Optional public HTTPS/WSS proxy port: `443`
+- Native relay listener ports:
+  - TCP: `9095`
+  - WS backend: `9096`
+  - native AutoTLS WSS: `9097`
 - Service name: `uc-go-peer`
 - AutoTLS refresh service: `uc-go-peer-autotls-refresh`
-- Install directory: `/opt/go-peer`
-- Environment file: `/etc/default/uc-go-peer`
-- Data directory: `/var/lib/uc-go-peer`
+- Install directory: contract-defined, currently `/opt/go-peer`
+- Environment file: contract-defined, currently `/etc/default/uc-go-peer`
+- Data directory: contract-defined, currently `/var/lib/uc-go-peer`
+- Binary path: contract-defined, currently `/usr/local/bin/universal-chat-go`
 - Configure helper: `/usr/local/sbin/uc-go-peer-configure.sh`
 - Setup endpoint service: `uc-go-peer-bootstrap.service`
 - Ready file: `/etc/default/uc-go-peer.ready`
@@ -342,12 +378,21 @@ running Go relay announces the actual externally reachable TCP, WSS, QUIC,
 WebTransport, and WebRTC addresses.
 
 Unlike the OrbitDB profile, `uc-go-peer` keeps native AutoTLS-enabled WSS on
-its mapped `9096` host port. A post-start AutoTLS refresh step then reads the
-exact `libp2p.direct` hostname from the running service logs, replaces the
-wildcard placeholder announce entries with that concrete secure hostname, and,
-when a proxy hostname is available, also writes a Caddy config so the instance
-web proxy can expose an additional `443`-based `/dns4|/dns6/.../tls/ws` path in
-front of the native AutoTLS WSS backend.
+its mapped `9097` host port, while the plain websocket backend stays on
+internal `9096`. A post-start AutoTLS refresh step then reads the exact
+`libp2p.direct` hostname from the running service logs, replaces the wildcard
+placeholder announce entries with that concrete secure hostname, and, when a
+proxy hostname is available, can also keep an additional `443`-based
+`/dns4|/dns6/.../tls/ws` path in front of the native AutoTLS WSS backend.
+
+The rootfs build path for `uc-go-peer` is now more contract-driven than before:
+
+- `read-rootfs-contract.py` exports `binaryPath`, `manifest.copyTarget`, and
+  the contract service names
+- `build-rootfs-image.sh` uses the contract-defined install path, data path,
+  env file, service names, and binary path
+- `build-rootfs.sh` can copy the generated manifest back into the
+  contract-declared consumer path
 
 ## First-Boot Requirements
 
