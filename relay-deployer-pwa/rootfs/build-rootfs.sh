@@ -321,6 +321,40 @@ EOF
   esac
 }
 
+sync_manifest_copy_target() {
+  local manifest_path="${OUT_DIR}/rootfs-manifest.json"
+  local copy_target="${ROOTFS_CONTRACT_MANIFEST_COPY_TARGET:-}"
+  local resolved_target=""
+  local target_dir=""
+  local target_ext=".json"
+  local versioned_target=""
+
+  [ -n "${copy_target}" ] || return 0
+  [ -f "${manifest_path}" ] || die "Manifest does not exist: ${manifest_path}"
+
+  if [[ "${copy_target}" = /* ]]; then
+    resolved_target="${copy_target}"
+  else
+    resolved_target="${REPO_DIR}/${copy_target}"
+  fi
+
+  target_dir="$(dirname "${resolved_target}")"
+  mkdir -p "${target_dir}"
+  cp "${manifest_path}" "${resolved_target}"
+
+  case "${resolved_target}" in
+    *.json)
+      target_ext=".json"
+      ;;
+  esac
+
+  versioned_target="${target_dir}/${ROOTFS_VERSION}${target_ext}"
+  cp "${manifest_path}" "${versioned_target}"
+
+  echo "Copied rootfs manifest to ${resolved_target}"
+  echo "Copied versioned rootfs manifest to ${versioned_target}"
+}
+
 write_manifest() {
   local rootfs_item_hash="$1"
   local rootfs_source_size_bytes=""
@@ -374,6 +408,7 @@ $(if [[ "${rootfs_source_size_bytes}" =~ ^[0-9]+$ ]]; then printf '  "rootfsSour
 EOF
 
   echo "Rootfs manifest written to ${OUT_DIR}/rootfs-manifest.json"
+  sync_manifest_copy_target
 }
 
 upload_image() {

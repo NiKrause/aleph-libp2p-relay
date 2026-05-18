@@ -75,6 +75,11 @@ falls back to Aleph-managed base images like Ubuntu 22 and Debian 12.
 If you want to use a custom qcow2 rootfs instead, keep using
 `public/rootfs-manifest.json` and build/upload the image first:
 
+- if your rootfs contract sets `manifest.copyTarget` to
+  `relay-deployer-pwa/public/rootfs-manifest.json`, `rootfs/build-rootfs.sh`
+  now syncs the latest and versioned manifest automatically
+- otherwise keep the manual copy step below
+
 ```bash
 rootfs/build-rootfs.sh
 cp dist-rootfs/rootfs-manifest.json public/rootfs-manifest.json
