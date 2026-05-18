@@ -11,6 +11,7 @@ AUTOTLS_READY_FILE="${AUTOTLS_READY_FILE:-/etc/default/uc-go-peer.autotls-ready}
 AUTOTLS_ZONE_FILE="${AUTOTLS_ZONE_FILE:-/etc/default/uc-go-peer.autotls-zone}"
 AUTOTLS_HOSTS_FILE="${AUTOTLS_HOSTS_FILE:-/etc/default/uc-go-peer.autotls-hosts}"
 AUTOTLS_CADDY_READY_FILE="${AUTOTLS_CADDY_READY_FILE:-/etc/default/uc-go-peer.caddy-ready}"
+APP_BINARY="${APP_BINARY:-/usr/local/bin/universal-chat-go}"
 GO_VERSION="${GO_VERSION:-1.25.0}"
 PHASE="${1:-all}"
 
@@ -23,6 +24,7 @@ echo "[uc-go-peer-bootstrap] starting"
 echo "[uc-go-peer-bootstrap] install dir: ${INSTALL_DIR}"
 echo "[uc-go-peer-bootstrap] data dir: ${DATA_DIR}"
 echo "[uc-go-peer-bootstrap] env file: ${ENV_FILE}"
+echo "[uc-go-peer-bootstrap] app binary: ${APP_BINARY}"
 echo "[uc-go-peer-bootstrap] requested Go version: ${GO_VERSION}"
 
 run_phase_base() {
@@ -50,7 +52,7 @@ run_phase_build() {
   echo "[uc-go-peer-bootstrap] go version: $(go version)"
   cd "${INSTALL_DIR}"
   echo "[uc-go-peer-bootstrap] building universal-chat-go"
-  CGO_ENABLED=0 go build -x -ldflags="-w -s" -o /usr/local/bin/universal-chat-go .
+  CGO_ENABLED=0 go build -x -ldflags="-w -s" -o "${APP_BINARY}" .
   echo "[uc-go-peer-bootstrap] build complete"
 }
 
@@ -96,6 +98,7 @@ seed_env() {
   write_env_var "GO_PEER_TCP_PORT" "9095"
   write_env_var "GO_PEER_WS_PORT" "9096"
   write_env_var "GO_PEER_WSS_PORT" "9097"
+  write_env_var "GO_PEER_BINARY_PATH" "${APP_BINARY}"
   write_env_var "GO_PEER_IDENTITY_PATH" "${DATA_DIR}/identity.key"
   write_env_var "GO_PEER_WS_BACKEND_PORT" "9096"
   write_env_var "GO_PEER_AUTOTLS_CERT_DIR" "${DATA_DIR}/p2p-forge-certs"
