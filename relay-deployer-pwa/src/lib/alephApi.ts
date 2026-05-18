@@ -1,6 +1,9 @@
 import { ALEPH_API_HOST } from './config'
 import { fetchMessageEnvelope, normalizeMessageStatus } from '@le-space/browser'
 export {
+  broadcastAlephMessage,
+  broadcastInstanceMessage,
+  createAlephBrowserClient,
   fetchBalance,
   fetchCrns,
   fetchInstances,
@@ -11,8 +14,6 @@ export {
 } from '@le-space/browser'
 import { fetchWithTimeout } from './http'
 import type {
-  AlephBroadcastMessage,
-  AlephBroadcastResponse,
   Crn,
   InstanceAllocation,
   InstanceExecution,
@@ -604,73 +605,4 @@ export async function fetchInstanceRuntimeDetails(
   )
 
   return Object.fromEntries(resolvedDetails)
-}
-
-function isInvalidMessageFormatResponse(response: Response, payload: AlephBroadcastResponse): boolean {
-  if (response.status !== 422) return false
-
-  const details = payload.details
-  if (typeof details === 'string' && details.includes('InvalidMessageFormat')) return true
-  if (details && typeof details === 'object') {
-    const detailMessage = (details as { message?: unknown }).message
-    if (typeof detailMessage === 'string' && detailMessage.includes('InvalidMessageFormat')) return true
-  }
-
-  return false
-}
-
-async function postBroadcastPayload(
-  body: Record<string, unknown>,
-  apiHost: string
-): Promise<{ response: AlephBroadcastResponse; httpStatus: number; rawResponse: Response }> {
-  const rawResponse = await fetchWithTimeout(`${apiHost}/api/v0/messages`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body)
-  })
-
-  const response = (await rawResponse.json().catch(() => ({}))) as AlephBroadcastResponse
-  return {
-    response,
-    httpStatus: rawResponse.status,
-    rawResponse
-  }
-}
-
-export async function broadcastInstanceMessage(
-  message: AlephBroadcastMessage,
-  apiHost = ALEPH_API_HOST,
-  sync = false
-): Promise<{ response: AlephBroadcastResponse; httpStatus: number }> {
-  const attempts: Array<Record<string, unknown>> = [
-    { sync, message },
-    { ...message, sync },
-    { ...message }
-  ]
-
-  for (let index = 0; index < attempts.length; index += 1) {
-    const result = await postBroadcastPayload(attempts[index], apiHost)
-    if (result.rawResponse.ok || result.httpStatus === 202) {
-      return {
-        response: result.response,
-        httpStatus: result.httpStatus
-      }
-    }
-
-    const canRetry =
-      index < attempts.length - 1 && isInvalidMessageFormatResponse(result.rawResponse, result.response)
-    if (!canRetry) {
-      throw new Error(`Broadcast failed: ${result.httpStatus} ${JSON.stringify(result.response)}`)
-    }
-  }
-
-  throw new Error('Broadcast failed: no compatible request format was accepted')
-}
-
-export async function broadcastAlephMessage(
-  message: AlephBroadcastMessage,
-  apiHost = ALEPH_API_HOST,
-  sync = false
-): Promise<{ response: AlephBroadcastResponse; httpStatus: number }> {
-  return broadcastInstanceMessage(message, apiHost, sync)
 }
