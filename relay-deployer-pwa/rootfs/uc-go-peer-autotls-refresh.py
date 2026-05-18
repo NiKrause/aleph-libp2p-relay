@@ -15,7 +15,7 @@ AUTOTLS_CADDY_READY_FILE = os.environ.get("AUTOTLS_CADDY_READY_FILE", "/etc/defa
 SERVICE_NAME = os.environ.get("SERVICE_NAME", "uc-go-peer.service")
 CADDY_SERVICE = os.environ.get("CADDY_SERVICE", "caddy.service")
 CADDYFILE = os.environ.get("CADDYFILE", "/etc/caddy/Caddyfile")
-WS_BACKEND_PORT = os.environ.get("WS_BACKEND_PORT", "9095").strip()
+WS_BACKEND_PORT = os.environ.get("WS_BACKEND_PORT", "9097").strip()
 WAIT_TIMEOUT_SECONDS = int(os.environ.get("AUTOTLS_WAIT_TIMEOUT_SECONDS", "900"))
 WAIT_INTERVAL_SECONDS = float(os.environ.get("AUTOTLS_WAIT_INTERVAL_SECONDS", "5"))
 
@@ -119,9 +119,9 @@ def main() -> None:
         raise SystemExit(f"missing ready file: {READY_FILE}")
 
     env_values = parse_env_file(ENV_FILE)
-    ws_port = env_values.get("GO_PEER_TCP_PORT", "").strip() or WS_BACKEND_PORT
+    ws_port = env_values.get("GO_PEER_WSS_PORT", "").strip() or WS_BACKEND_PORT
     if not ws_port:
-        raise RuntimeError("missing GO_PEER_TCP_PORT in environment file")
+        raise RuntimeError("missing GO_PEER_WSS_PORT in environment file")
 
     zone, exact_hosts, exact_logged_addrs = wait_for_exact_hosts(ws_port)
     if not exact_hosts:
