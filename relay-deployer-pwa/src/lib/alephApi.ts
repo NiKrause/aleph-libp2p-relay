@@ -1,5 +1,5 @@
 import { ALEPH_API_HOST } from './config'
-import { fetchMessageEnvelope, normalizeMessageStatus } from '@le-space/browser'
+import { fetchMessageEnvelope, fetchSchedulerAllocation, normalizeMessageStatus } from '@le-space/browser'
 export {
   broadcastAlephMessage,
   broadcastInstanceMessage,
@@ -8,33 +8,13 @@ export {
   fetchCrns,
   fetchInstances,
   fetchMessageEnvelope,
+  fetchSchedulerAllocation,
   inspectDeploymentResult,
   normalizeMessageStatus,
   waitForDeploymentResult
 } from '@le-space/browser'
 import { fetchWithTimeout } from './http'
-import type {
-  Crn,
-  InstanceAllocation,
-  InstanceExecution,
-  InstanceMessage,
-  InstanceRuntimeDetails
-} from './types'
-
-type SchedulerAllocationPayload = {
-  vm_hash?: unknown
-  vm_ipv6?: unknown
-  period?: {
-    start_timestamp?: unknown
-    duration_seconds?: unknown
-  } | null
-  node?: {
-    node_id?: unknown
-    url?: unknown
-    ipv6?: unknown
-    supports_ipv6?: unknown
-  } | null
-}
+import type { Crn, InstanceAllocation, InstanceExecution, InstanceMessage, InstanceRuntimeDetails } from './types'
 
 type CrnExecutionV1Payload = {
   networking?: {
@@ -224,38 +204,6 @@ async function fetch2n6WebAccessUrl(instanceItemHash: string): Promise<string | 
       error: message
     })
     return null
-  }
-}
-
-async function fetchSchedulerAllocation(itemHash: string): Promise<InstanceAllocation | null> {
-  const response = await fetchWithTimeout(`https://scheduler.api.aleph.cloud/api/v0/allocation/${itemHash}`, {
-    cache: 'no-cache'
-  })
-
-  if (response.status === 404) return null
-  if (!response.ok) throw new Error(`Scheduler allocation request failed: ${response.status}`)
-
-  const payload = (await response.json()) as SchedulerAllocationPayload
-  const node = payload.node
-
-  return {
-    source: 'scheduler',
-    crnUrl: asString(node?.url),
-    node: node
-      ? {
-          node_id: asString(node.node_id) ?? undefined,
-          url: asString(node.url) ?? undefined,
-          ipv6: asString(node.ipv6),
-          supports_ipv6: typeof node.supports_ipv6 === 'boolean' ? node.supports_ipv6 : undefined
-        }
-      : null,
-    vmIpv6: asString(payload.vm_ipv6),
-    period: payload.period
-      ? {
-          start_timestamp: asString(payload.period.start_timestamp) ?? undefined,
-          duration_seconds: asNumber(payload.period.duration_seconds) ?? undefined
-        }
-      : null
   }
 }
 
