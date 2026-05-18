@@ -1,4 +1,9 @@
 import {
+  createReleaseMetadata as createSharedReleaseMetadata,
+  isValidSshPublicKey,
+  normalizeSshPublicKey
+} from '@le-space/core'
+import {
   DEFAULT_BASE_ROOTFS,
   ALEPH_DEFAULT_CHANNEL,
   PRICE_STALE_MS
@@ -6,6 +11,7 @@ import {
 import { toNumber } from './format'
 import { ITEM_HASH_RE } from './rootfsManifest'
 import type {
+  AAWalletAssessment,
   BalanceResponse,
   Crn,
   DeploymentForm,
@@ -20,8 +26,6 @@ import type {
 } from './types'
 
 const QUOTE_EPSILON = 1e-9
-const SSH_PUBLIC_KEY_PATTERN =
-  /^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\s+[A-Za-z0-9+/]+={0,3}(?:\s+.+)?$/
 
 export const DEFAULT_DEPLOYMENT_FORM: DeploymentForm = {
   name: 'py-libp2p-relay',
@@ -85,21 +89,6 @@ export function buildPaymentQuote(tier: Tier, pricing: InstancePricing, balance:
     unitPrice,
     label: 'credits'
   }
-}
-
-export function normalizeSshPublicKey(value: string): string {
-  return value
-    .split(/\r?\n/g)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-export function isValidSshPublicKey(value: string): boolean {
-  const normalized = normalizeSshPublicKey(value)
-  return SSH_PUBLIC_KEY_PATTERN.test(normalized)
 }
 
 export function validateDeployment(args: {
@@ -180,11 +169,46 @@ export function validateDeployment(args: {
 }
 
 export function createReleaseMetadata(name: string, rootfsVersion: string) {
-  return {
-    name,
-    rootfs_version: rootfsVersion,
-    deployer: 'aleph-relay-deployer-pwa'
-  }
+  return createSharedReleaseMetadata(name, rootfsVersion, 'aleph-relay-deployer-pwa')
 }
 
+export function quoteRequiredBudgetUnits(quote: PaymentQuote | null): bigint {
+  if (!quote) return 0n
+  return BigInt(Math.ceil(quote.required * 1_000_000_000_000_000_000))
+}
+
+export function prepaidValidationErrors(args: {
+  aaWallet: AAWalletAssessment | null
+  quote: PaymentQuote | null
+  availableBalance: bigint
+  currentReservationAmount: bigint
+  reservationExpired: boolean
+  prepaidConfigured: boolean
+}): string[] {
+  if (!args.prepaidConfigured) return []
+
+  const errors: string[] = []
+  const requiredBudget = quoteRequiredBudgetUnits(args.quote)
+
+  if (!args.aaWallet) {
+    errors.push('AA wallet assessment is required before prepaid deployment can proceed.')
+    return errors
+  }
+
+  if (args.aaWallet.enforcementLevel !== 'contract-signature-ready') {
+    errors.push('Hard prepaid enforcement is not available for the connected wallet address. Use a smart-account owner address or disable prepaid gating.')
+  }
+
+  if (args.availableBalance < requiredBudget) {
+    errors.push('Insufficient prepaid budget in the configured vault.')
+  }
+
+  if (args.currentReservationAmount < requiredBudget || args.reservationExpired) {
+    errors.push('Reserve the current deployment intent in the prepaid vault before signing.')
+  }
+
+  return errors
+}
+
+export { isValidSshPublicKey, normalizeSshPublicKey }
 export { ALEPH_DEFAULT_CHANNEL }
