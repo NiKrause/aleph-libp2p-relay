@@ -197,6 +197,108 @@ The temporary setup server inside the guest also exposes:
 - `GET /metadata` to return the describe payload once the relay has started and
   its announced/bootstrap addresses can be summarized
 
+## Flow Diagrams
+
+### Go Relay Rootfs Creation And Aleph Publish
+
+```mermaid
+flowchart TD
+    A[Workflow dispatch<br/>build-aleph-go-peer-rootfs.yml] --> B[Checkout universal-connectivity]
+    B --> C[Read uc-go-peer rootfs contract]
+    C --> D[Export contract-derived env<br/>ROOTFS_PROFILE<br/>ROOTFS_INSTALL_MODE<br/>ROOTFS_CONTRACT_FILE]
+    D --> E[Checkout rootfs builder repo<br/>NiKrause/aleph-libp2p-relay]
+    E --> F[Install build dependencies]
+    F --> G{publish=true?}
+    G -- no --> H[Skip Aleph client/account setup]
+    G -- yes --> I[Install aleph-client]
+    I --> J[Write ~/.aleph-im/config.json<br/>and ~/.aleph-im/private-keys/aleph-vm.key]
+    H --> K[Run relay-deployer-pwa/rootfs/build-rootfs.sh]
+    J --> K
+    K --> L[Load contract with read-rootfs-contract.py]
+    L --> M[Select profile uc-go-peer<br/>and install mode prebaked]
+    M --> N{Builder driver}
+    N -->|CI| O[Use Dockerized Debian/libguestfs builder]
+    N -->|local Linux| P[Use host virt-customize path]
+    O --> Q[Run build-rootfs-image.sh]
+    P --> Q
+    Q --> R[Download Debian cloud image]
+    R --> S[Resize qcow2]
+    S --> T[Tar universal-connectivity/go-peer<br/>into dist-rootfs/uc-go-peer.tar]
+    T --> U[virt-customize copies scripts/services<br/>and runs bootstrap base/build/finalize]
+    U --> V[Emit aleph-uc-go-peer.qcow2]
+    V --> W{publish=true?}
+    W -- no --> X[Write local artifacts only]
+    W -- yes --> Y[Upload qcow2 to Aleph IPFS add endpoint]
+    Y --> Z[Extract CID]
+    Z --> AA[aleph file pin CID]
+    AA --> AB[Extract rootfs item hash]
+    X --> AC[Write rootfs-manifest.json]
+    AB --> AC
+    AC --> AD[Upload workflow artifacts<br/>qcow2/manifest/json logs]
+```
+
+### What Happens Inside Docker In CI
+
+```mermaid
+flowchart TD
+    A[build-rootfs.sh in CI] --> B[ROOTFS_BUILD_DRIVER=auto]
+    B --> C[Choose build_with_docker]
+    C --> D[Build rootfs/Dockerfile.rootfs]
+    D --> E[Container contains libguestfs-tools<br/>linux-image-amd64<br/>qemu-system-x86<br/>qemu-utils<br/>python3 curl tar]
+    E --> F[Mount builder repo at /workspace]
+    F --> G[Mount universal-connectivity checkout read-only]
+    G --> H[Run bash rootfs/build-rootfs-image.sh]
+
+    subgraph Inside Builder Container
+      H --> I[Load contract again]
+      I --> J[Download base Debian qcow2 if missing]
+      J --> K[Copy and resize qcow2]
+      K --> L[Create uc-go-peer.tar from go-peer/]
+    L --> M[virt-customize creates contract-defined install/data directories]
+    M --> N[virt-customize copies scripts and service units]
+    N --> O[Run uc-go-peer-bootstrap.sh base]
+    O --> P[Run uc-go-peer-bootstrap.sh build]
+    P --> Q[Run uc-go-peer-bootstrap.sh finalize]
+    Q --> R[Enable contract-defined services and write qcow2]
+    end
+
+    T --> U[Container exits]
+    U --> V[Host workflow continues with upload and artifacts]
+```
+
+### js-peer Build, Aleph Publish, And Domain Linking
+
+```mermaid
+flowchart TD
+    A[Trigger js-peer.yml] --> B[Checkout repo]
+    B --> C[setup-node]
+    C --> D[npm ci]
+    D --> E[npm run lint]
+    E --> F[npm run build]
+    F --> G[Static output in js-peer/out]
+    G --> H{GitHub event}
+
+    H -->|pull_request| I[Deploy preview on Aleph for PRs]
+    I --> J[aleph-im/web3-hosting-action<br/>path=js-peer/out]
+    J --> K[Preview URL / CID / item hash summary]
+
+    H -->|push to non-main branch| L[Deploy preview on Aleph for branch pushes]
+    L --> M[web3-hosting-action<br/>with private key + retention]
+    M --> K
+
+    H -->|push to main| N[Deploy production on Aleph]
+    N --> O[web3-hosting-action<br/>path=js-peer/out<br/>private key]
+    O --> P{ALEPH_DOMAIN set?}
+    P -- no --> Q[Stop after production deployment]
+    P -- yes --> R[Prepare local Aleph key file]
+    R --> S[aleph domain detach domain --no-ask]
+    S --> T[aleph domain attach domain<br/>--item-hash ITEM_HASH<br/>--catch-all-path /index.html]
+    T --> U[Live domain now points to new deployment]
+
+    K --> V[Preview only]
+    V --> W[No production domain update on PRs or non-main pushes]
+```
+
 ## Runtime Defaults
 
 ### `py-libp2p`
