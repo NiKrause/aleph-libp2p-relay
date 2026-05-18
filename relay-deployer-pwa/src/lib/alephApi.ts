@@ -1,11 +1,12 @@
 import { ALEPH_API_HOST } from './config'
-import { fetchMessageEnvelope, fetchSchedulerAllocation, normalizeMessageStatus } from '@le-space/browser'
+import { fetch2n6WebAccessUrl, fetchMessageEnvelope, fetchSchedulerAllocation, normalizeMessageStatus } from '@le-space/browser'
 export {
   broadcastAlephMessage,
   broadcastInstanceMessage,
   configureOrbitdbRelaySetup,
   createAlephBrowserClient,
   fetchBalance,
+  fetch2n6WebAccessUrl,
   fetchCrns,
   fetchInstances,
   fetchMessageEnvelope,
@@ -73,14 +74,6 @@ type CrnExecutionLookupResult = {
   blocked: boolean
   requestUrl?: string
   version?: 'v1' | 'v2'
-}
-
-type TwoN6HashLookupPayload = {
-  instance_hash?: unknown
-  subdomain?: unknown
-  url?: unknown
-  ipv6?: unknown
-  active?: unknown
 }
 
 function asString(value: unknown): string | null {
@@ -157,50 +150,6 @@ function extractProxyCandidates(item: CrnExecutionV2Payload, networking: CrnExec
           domain: asString(item.webAccess.domain)
         }
       : null
-  }
-}
-
-async function fetch2n6WebAccessUrl(instanceItemHash: string): Promise<string | null> {
-  const requestUrl = `https://api.2n6.me/api/hash/${instanceItemHash}`
-
-  try {
-    const response = await fetchWithTimeout(requestUrl, { cache: 'no-cache' })
-    if (response.status === 404) {
-      console.info('[instance-runtime] 2n6 web access lookup returned no record', {
-        instanceItemHash,
-        requestUrl,
-        status: 404
-      })
-      return null
-    }
-
-    if (!response.ok) {
-      console.info('[instance-runtime] 2n6 web access lookup returned non-ok response', {
-        instanceItemHash,
-        requestUrl,
-        status: response.status
-      })
-      return null
-    }
-
-    const payload = (await response.json()) as TwoN6HashLookupPayload
-    const url = normalizeProxyUrl(payload.url ?? payload.subdomain)
-    console.info('[instance-runtime] 2n6 web access lookup result', {
-      instanceItemHash,
-      requestUrl,
-      url,
-      active: payload.active === true,
-      raw: payload
-    })
-    return url
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    console.info('[instance-runtime] 2n6 web access lookup failed', {
-      instanceItemHash,
-      requestUrl,
-      error: message
-    })
-    return null
   }
 }
 
