@@ -150,6 +150,9 @@ write_env_var "EXTERNAL_RELAY_WS_PORT" "${WS_PORT}"
 write_env_var "GO_PEER_WSS_PORT" "${GO_PEER_WSS_PORT:-9097}"
 if [ -n "${PROXY_HOSTNAME}" ]; then
   write_env_var "PROXY_HOSTNAME" "${PROXY_HOSTNAME}"
+else
+  write_env_var "PROXY_HOSTNAME" ""
+  rm -f "${AUTOTLS_CADDY_READY_FILE}"
 fi
 if [ -n "${UDP_PORT}" ]; then
   write_env_var "EXTERNAL_RELAY_UDP_PORT" "${UDP_PORT}"
@@ -164,13 +167,13 @@ if [ "${START_SERVICE}" -eq 1 ]; then
   systemctl daemon-reload
   systemctl enable "${SERVICE_NAME}"
   systemctl restart "${SERVICE_NAME}"
+  systemctl enable "${AUTOTLS_REFRESH_SERVICE}"
   if [ -n "${PROXY_HOSTNAME}" ]; then
-    systemctl enable "${AUTOTLS_REFRESH_SERVICE}"
-    systemctl restart "${AUTOTLS_REFRESH_SERVICE}"
+    :
   else
-    systemctl stop "${AUTOTLS_REFRESH_SERVICE}" || true
     systemctl stop "${CADDY_SERVICE}" || true
   fi
+  systemctl restart --no-block "${AUTOTLS_REFRESH_SERVICE}"
   systemctl stop "${BOOTSTRAP_SERVICE}" || true
 fi
 
