@@ -1,11 +1,11 @@
 import {
   createUnsignedForgetMessage as createSharedUnsignedForgetMessage,
-  normalizeBroadcastStatus
+  normalizeBroadcastStatus,
+  signAlephMessage
 } from '@le-space/core'
 import { ALEPH_API_HOST, ALEPH_DEFAULT_CHANNEL } from './config'
 import { broadcastAlephMessage } from './alephApi'
 import { sha256Hex } from './crypto'
-import { signaturePayload } from './alephMessage'
 import { personalSign } from './wallet'
 import type { AlephBroadcastMessage, AlephBroadcastResponse, AlephForgetContent, MessageStatus } from './types'
 
@@ -58,11 +58,7 @@ export async function signForgetMessage(
   unsignedMessage: Omit<AlephBroadcastMessage, 'signature'>,
   signer = personalSign
 ): Promise<AlephBroadcastMessage> {
-  const signature = await signer(unsignedMessage.sender, signaturePayload(unsignedMessage))
-  return {
-    ...unsignedMessage,
-    signature: signature.startsWith('0x') ? signature : `0x${signature}`
-  }
+  return signAlephMessage(unsignedMessage, signer)
 }
 
 function normalizeSdkStatus(error: unknown): MessageStatus {
