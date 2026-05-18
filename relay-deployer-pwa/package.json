@@ -13,6 +13,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@le-space/browser": "file:/Users/nandi/Documents/projekte/DecentraSol/shared-aleph-tooling/packages/browser",
     "@le-space/rootfs": "^0.1.20",
     "@le-space/core": "^0.1.20",
     "@aleph-sdk/client": "^1.7.4",

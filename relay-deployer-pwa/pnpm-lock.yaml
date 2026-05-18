@@ -14,6 +14,9 @@ importers:
       '@aleph-sdk/ethereum':
         specifier: ^1.8.0
         version: 1.8.0(@aleph-sdk/account@1.7.4(@aleph-sdk/core@1.7.4))(@aleph-sdk/core@1.7.4)(@aleph-sdk/evm@1.8.0(@aleph-sdk/account@1.7.4(@aleph-sdk/core@1.7.4))(@aleph-sdk/core@1.7.4)(ethers@5.8.0))(ethers@5.8.0)
+      '@le-space/browser':
+        specifier: file:/Users/nandi/Documents/projekte/DecentraSol/shared-aleph-tooling/packages/browser
+        version: file:../../../Documents/projekte/DecentraSol/shared-aleph-tooling/packages/browser
       '@le-space/core':
         specifier: ^0.1.20
         version: 0.1.20
@@ -922,6 +925,9 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@le-space/browser@file:../../../Documents/projekte/DecentraSol/shared-aleph-tooling/packages/browser':
+    resolution: {directory: ../../../Documents/projekte/DecentraSol/shared-aleph-tooling/packages/browser, type: directory}
 
   '@le-space/core@0.1.20':
     resolution: {integrity: sha512-Ird2/MqXUZPn5qTv1FX4saQ78CEboaynoXNW/7kc47JhuLr95Eok1Xr7zoZ6htQ7+H6qwvk5eXudW+wejzIVMA==}
@@ -3963,6 +3969,8 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@le-space/browser@file:../../../Documents/projekte/DecentraSol/shared-aleph-tooling/packages/browser': {}
 
   '@le-space/core@0.1.20':
     dependencies:
