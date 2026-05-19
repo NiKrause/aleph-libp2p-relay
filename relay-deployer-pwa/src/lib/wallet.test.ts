@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { connectWallet, fetchAlephTokenBalance, personalSign, toChecksumAddress } from './wallet'
+import { assessAAWallet, connectWallet, fetchAlephTokenBalance, personalSign, toChecksumAddress } from './wallet'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -61,5 +61,20 @@ describe('wallet helpers', () => {
     expect(init?.method).toBe('POST')
     expect(String(init?.body)).toContain('"method":"eth_call"')
     expect(String(init?.body)).toContain('70a08231')
+  })
+
+  it('assesses EOAs as soft-gated prepaid owners', async () => {
+    const provider = {
+      request: vi.fn(async ({ method }: { method: string }) => {
+        if (method === 'eth_getCode') return '0x'
+        return null
+      })
+    }
+
+    const assessment = await assessAAWallet('0x822A6cc04c19eC6FA1167896658A87a449F4dd15', provider as unknown as EthereumProvider)
+
+    expect(assessment.kind).toBe('eoa')
+    expect(assessment.enforcementLevel).toBe('soft-gate')
+    expect(assessment.supportsContractSignatures).toBe(false)
   })
 })
