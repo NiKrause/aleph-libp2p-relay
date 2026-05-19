@@ -1,14 +1,14 @@
 {
   "profile": "uc-go-peer",
-  "version": "uc-go-peer-git-20260508-fee0746",
+  "version": "uc-go-peer-git-20260512-5c3429a",
   "rootfsInstallStrategy": "prebaked",
   "requiresBootstrapNetwork": false,
   "bootstrapSummary": "Dependencies are preinstalled in the image.",
-  "rootfsSourceSizeBytes": 699369970,
+  "rootfsSourceSizeBytes": 675115824,
   "requiredPortForwards": [{"port":22,"tcp":true,"udp":false,"purpose":"SSH"},{"port":80,"tcp":true,"udp":false,"purpose":"Temporary setup endpoint"},{"port":443,"tcp":true,"udp":false,"purpose":"Caddy HTTPS and WSS proxy"},{"port":9095,"tcp":true,"udp":true,"purpose":"libp2p raw TCP and UDP transports"}],
-  "rootfsCid": "QmV9W9QwLqCsaG5WWB7Vtpkxjx6Eh7kjZhdNALTiAnJJi3",
-  "rootfsItemHash": "aa14200818e0491e507e6d5620524b5dec7631050ef5858dc060eab4b143de43",
+  "rootfsCid": "QmYMmv9xC97ziCc93iWzK4r9N2WR7onq3K84tJLpi2ybez",
+  "rootfsItemHash": "380b99e0577fb7771f1b3c0a369f4abff9094e9205b0b466783453299ef9f4f2",
   "rootfsSizeMiB": 20480,
-  "createdAt": "2026-05-08T10:59:30Z",
+  "createdAt": "2026-05-12T07:40:09Z",
   "notes": "The go-peer image keeps the relay on internal port 9095, then advertises raw TCP on external port 80, secure WebSocket on 443 via Caddy, and a single externally mapped UDP port for QUIC, WebTransport, and WebRTC-direct."
 }
