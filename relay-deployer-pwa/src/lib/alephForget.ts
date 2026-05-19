@@ -3,7 +3,7 @@ import {
   normalizeBroadcastStatus,
   signAlephMessage
 } from '@le-space/core'
-import { ALEPH_API_HOST, ALEPH_DEFAULT_CHANNEL } from './config'
+import { ALEPH_API_HOST, ALEPH_DEFAULT_CHANNEL } from './alephConfig'
 import { broadcastAlephMessage } from './alephApi'
 import { sha256Hex } from './crypto'
 import { personalSign } from './wallet'

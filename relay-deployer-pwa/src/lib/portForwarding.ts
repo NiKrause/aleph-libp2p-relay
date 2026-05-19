@@ -7,7 +7,7 @@ import {
   requiredInstancePortForwards
 } from '@le-space/core'
 import type { RootfsManifest as SharedRootfsManifest } from '@le-space/shared-types'
-import { ALEPH_API_HOST, ALEPH_DEFAULT_CHANNEL } from './config'
+import { ALEPH_API_HOST, ALEPH_DEFAULT_CHANNEL } from './alephConfig'
 import { fetchWithTimeout } from './http'
 import { sha256Hex } from './crypto'
 import { personalSign } from './wallet'

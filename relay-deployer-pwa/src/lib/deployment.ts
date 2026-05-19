@@ -9,10 +9,10 @@ import {
   tierSpec
 } from '@le-space/core'
 import {
-  DEFAULT_BASE_ROOTFS,
   ALEPH_DEFAULT_CHANNEL,
   PRICE_STALE_MS
-} from './config'
+} from './alephConfig'
+import { DEFAULT_BASE_ROOTFS } from './rootfsConfig'
 import { ITEM_HASH_RE } from './rootfsManifest'
 import type {
   AAWalletAssessment,

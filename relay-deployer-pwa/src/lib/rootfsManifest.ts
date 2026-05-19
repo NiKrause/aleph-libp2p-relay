@@ -5,7 +5,8 @@ import {
   validateRootfsManifest as sharedValidateRootfsManifest,
   verifyRootfsExists as sharedVerifyRootfsExists
 } from '@le-space/browser'
-import { ALEPH_API_HOST, IPFS_GATEWAY_BASE_URL, ROOTFS_MANIFEST_URL } from './config'
+import { ALEPH_API_HOST } from './alephConfig'
+import { IPFS_GATEWAY_BASE_URL, ROOTFS_MANIFEST_URL } from './rootfsConfig'
 import type { RootfsManifest, RootfsManifestState, RootfsResolution } from './types'
 
 export const ITEM_HASH_RE = SHARED_ITEM_HASH_RE

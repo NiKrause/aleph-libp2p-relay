@@ -1,4 +1,4 @@
-import { ALEPH_API_HOST } from './config'
+import { ALEPH_API_HOST } from './alephConfig'
 import {
   fetch2n6WebAccessUrl,
   fetchCrnExecutionMap,

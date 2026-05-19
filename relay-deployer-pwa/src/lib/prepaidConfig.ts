@@ -1,0 +1,3 @@
+export const PREPAID_VAULT_ADDRESS = import.meta.env.VITE_PREPAID_VAULT_ADDRESS?.trim() || ''
+export const PREPAID_RESERVATION_TTL_SECONDS = Number(import.meta.env.VITE_PREPAID_RESERVATION_TTL_SECONDS || 900)
+export const PREPAID_TOKEN_DECIMALS = 18

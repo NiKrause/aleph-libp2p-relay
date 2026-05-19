@@ -9,11 +9,11 @@ import {
 } from '@le-space/core'
 export { signaturePayload } from '@le-space/core'
 import {
-  ALEPH_BASE_ROOTFS_ITEM_HASHES,
   ALEPH_API_HOST,
-  ALEPH_DEFAULT_CHANNEL,
-  PREPAID_RESERVATION_TTL_SECONDS
-} from './config'
+  ALEPH_DEFAULT_CHANNEL
+} from './alephConfig'
+import { ALEPH_BASE_ROOTFS_ITEM_HASHES } from './rootfsConfig'
+import { PREPAID_RESERVATION_TTL_SECONDS } from './prepaidConfig'
 import { keccak256Hex, sha256Hex } from './crypto'
 import { tierSpec } from './deployment'
 import { personalSign } from './wallet'

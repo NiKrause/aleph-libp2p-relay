@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createDeploymentIntent, createInstanceContent, createUnsignedInstanceMessage, signaturePayload, signInstanceMessage } from './alephMessage'
-import { ALEPH_BASE_ROOTFS_ITEM_HASHES } from './config'
+import { ALEPH_BASE_ROOTFS_ITEM_HASHES } from './rootfsConfig'
 import { DEFAULT_DEPLOYMENT_FORM } from './deployment'
 import type { InstancePricing, RootfsManifest, Tier } from './types'
 
