@@ -12,3 +12,12 @@ interface EthereumProvider {
 interface Window {
   ethereum?: EthereumProvider
 }
+
+interface ImportMetaEnv {
+  readonly VITE_PREPAID_VAULT_ADDRESS?: string
+  readonly VITE_PREPAID_RESERVATION_TTL_SECONDS?: string
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv
+}
