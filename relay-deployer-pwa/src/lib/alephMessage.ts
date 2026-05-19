@@ -1,6 +1,8 @@
 import {
+  createInstanceContent as createSharedInstanceContent,
   createDeploymentIntent as createSharedDeploymentIntent,
   createUnsignedInstanceMessage as createSharedUnsignedInstanceMessage,
+  deployInstance as deploySharedInstance,
   normalizeBroadcastStatus,
   signAlephMessage,
   signaturePayload
@@ -12,9 +14,8 @@ import {
   ALEPH_DEFAULT_CHANNEL,
   PREPAID_RESERVATION_TTL_SECONDS
 } from './config'
-import { broadcastAlephMessage } from './alephApi'
 import { keccak256Hex, sha256Hex } from './crypto'
-import { createReleaseMetadata, normalizeSshPublicKey, tierSpec } from './deployment'
+import { tierSpec } from './deployment'
 import { personalSign } from './wallet'
 import type {
   AlephBroadcastMessage,
@@ -39,9 +40,6 @@ export function createInstanceContent(args: {
   now?: number
 }): AlephInstanceContent {
   const spec = tierSpec(args.pricing, args.tier)
-  const sshKey = normalizeSshPublicKey(args.form.sshPublicKey)
-
-  const requirements = args.selectedCrn ? { node: { node_hash: args.selectedCrn.hash } } : undefined
   const rootfsRef =
     args.form.rootfsSourceMode === 'base'
       ? ALEPH_BASE_ROOTFS_ITEM_HASHES[args.form.baseRootfs]
@@ -54,41 +52,26 @@ export function createInstanceContent(args: {
     args.form.rootfsSourceMode === 'base'
       ? `aleph-base-${args.form.baseRootfs}`
       : args.manifest?.version ?? 'custom-rootfs'
-
-  const content: AlephInstanceContent = {
+  const content = createSharedInstanceContent({
     address: args.address,
-    time: args.now ?? Date.now() / 1000,
-    allow_amend: false,
-    metadata: createReleaseMetadata(args.form.name.trim(), rootfsVersion),
-    authorized_keys: sshKey ? [sshKey] : undefined,
-    environment: {
-      internet: true,
-      aleph_api: true,
-      hypervisor: 'qemu',
-      reproducible: false,
-      shared_cache: false
-    },
-    resources: {
-      vcpus: spec.vcpus,
-      memory: spec.memoryMiB,
-      seconds: 30
-    },
+    name: args.form.name.trim(),
+    sshPublicKey: args.form.sshPublicKey,
+    rootfsItemHash: rootfsRef,
+    rootfsSizeMiB,
+    vcpus: spec.vcpus,
+    memoryMiB: spec.memoryMiB,
+    rootfsVersion,
+    crnHash: args.selectedCrn?.hash,
+    now: args.now
+  })
+
+  return {
+    ...content,
     payment: {
-      type: 'credit'
-    },
-    requirements,
-    volumes: [],
-    rootfs: {
-      parent: {
-        ref: rootfsRef,
-        use_latest: true
-      },
-      persistence: 'host',
-      size_mib: rootfsSizeMiB
+      type: content.payment.type as AlephInstanceContent['payment']['type'],
+      chain: content.payment.chain as AlephInstanceContent['payment']['chain']
     }
   }
-
-  return content
 }
 
 export async function createUnsignedInstanceMessage(args: {
@@ -193,22 +176,26 @@ export async function deployInstance(args: {
   })
 
   try {
-    const unsignedMessage = await createUnsignedInstanceMessage({
+    const result = await deploySharedInstance({
       sender: args.sender,
       content,
+      hasher: sha256Hex,
+      signer: personalSign,
+      fetch,
+      apiHost: ALEPH_API_HOST,
       channel: args.channel ?? ALEPH_DEFAULT_CHANNEL,
+      sync: false,
       now: args.now
     })
-    const message = await signInstanceMessage(unsignedMessage)
-    const { response, httpStatus } = await broadcastAlephMessage(message, ALEPH_API_HOST, false)
-    const status = normalizeBroadcastStatus(httpStatus, response.message_status)
+    const status = normalizeBroadcastStatus(result.httpStatus ?? 0, result.response?.message_status)
 
     return {
-      itemHash: message.item_hash,
+      itemHash: result.itemHash,
       status,
-      message,
-      response,
-      rejectionReason: status === 'rejected' ? String(response.details ?? 'Aleph rejected this deployment.') : undefined
+      message: result.message!,
+      response: result.response!,
+      rejectionReason:
+        status === 'rejected' ? String(result.response?.details ?? 'Aleph rejected this deployment.') : undefined
     }
   } catch (error) {
     const status = normalizeSdkStatus(error)

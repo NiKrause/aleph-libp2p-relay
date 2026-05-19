@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createInstanceContent, createUnsignedInstanceMessage, signaturePayload, signInstanceMessage } from './alephMessage'
+import { createDeploymentIntent, createInstanceContent, createUnsignedInstanceMessage, signaturePayload, signInstanceMessage } from './alephMessage'
 import { ALEPH_BASE_ROOTFS_ITEM_HASHES } from './config'
 import { DEFAULT_DEPLOYMENT_FORM } from './deployment'
 import type { InstancePricing, RootfsManifest, Tier } from './types'
+
+const VALID_SSH_KEY =
+  'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG9A7L1fCP0f3dYxFJ0P0XrJ1hV6X4kRrS0vQd2c8mS0 user@example'
 
 const manifest: RootfsManifest = {
   version: 'relay-v0.1.0',
@@ -26,7 +29,7 @@ describe('Aleph instance message helpers', () => {
       form: {
         ...DEFAULT_DEPLOYMENT_FORM,
         rootfsSourceMode: 'custom',
-        sshPublicKey: 'ssh-ed25519 AAAATEST'
+        sshPublicKey: VALID_SSH_KEY
       },
       manifest,
       pricing,
@@ -54,7 +57,7 @@ describe('Aleph instance message helpers', () => {
         ...DEFAULT_DEPLOYMENT_FORM,
         rootfsSourceMode: 'base',
         baseRootfs: 'debian12',
-        sshPublicKey: 'ssh-ed25519 AAAATEST'
+        sshPublicKey: VALID_SSH_KEY
       },
       manifest: null,
       pricing,
@@ -73,7 +76,7 @@ describe('Aleph instance message helpers', () => {
       form: {
         ...DEFAULT_DEPLOYMENT_FORM,
         rootfsSourceMode: 'custom',
-        sshPublicKey: 'ssh-ed25519 AAAATEST'
+        sshPublicKey: VALID_SSH_KEY
       },
       manifest,
       pricing,
@@ -108,5 +111,34 @@ describe('Aleph instance message helpers', () => {
 
     expect(signer).toHaveBeenCalledWith('0xabc', `ETH\n0xabc\nINSTANCE\n${'f'.repeat(64)}`)
     expect(message.signature).toBe('0x1234')
+  })
+
+  it('builds a deterministic deployment intent hash from the unsigned instance message', async () => {
+    const intent = await createDeploymentIntent({
+      sender: '0xabc',
+      form: {
+        ...DEFAULT_DEPLOYMENT_FORM,
+        rootfsSourceMode: 'custom',
+        sshPublicKey: VALID_SSH_KEY,
+        selectedCrnHash: 'c'.repeat(64)
+      },
+      manifest,
+      pricing,
+      tier,
+      selectedCrn: {
+        hash: 'c'.repeat(64),
+        name: 'Chosen CRN',
+        address: 'https://crn.example'
+      },
+      quoteRequiredBudget: 14250n,
+      now: 123
+    })
+
+    expect(intent.intent.ownerAddress).toBe('0xabc')
+    expect(intent.intent.messageTime).toBe(123)
+    expect(intent.intent.itemHash).toHaveLength(64)
+    expect(intent.intent.crnHash).toBe('c'.repeat(64))
+    expect(intent.intent.maxCost).toBe('14250')
+    expect(intent.intentHash).toHaveLength(64)
   })
 })
