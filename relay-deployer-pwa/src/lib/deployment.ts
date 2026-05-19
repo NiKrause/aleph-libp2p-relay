@@ -1,6 +1,7 @@
 import {
   buildPaymentQuote,
   createReleaseMetadata as createSharedReleaseMetadata,
+  filterDeployableCrns,
   isValidSshPublicKey,
   normalizeSshPublicKey,
   quoteRequiredBudgetUnits,
@@ -12,7 +13,6 @@ import {
   ALEPH_DEFAULT_CHANNEL,
   PRICE_STALE_MS
 } from './config'
-import { toNumber } from './format'
 import { ITEM_HASH_RE } from './rootfsManifest'
 import type {
   AAWalletAssessment,
@@ -39,32 +39,7 @@ export const DEFAULT_DEPLOYMENT_FORM: DeploymentForm = {
 }
 
 export function compatibleCrns(crns: Crn[], spec: TierSpec): Crn[] {
-  return [...crns]
-    .filter((crn) => {
-      if (crn.qemu_support === false) return false
-
-      const usage = crn.system_usage
-      if (!usage) return true
-
-      const cpuOk = usage.cpu?.count == null || usage.cpu.count >= spec.vcpus
-      const memoryOk = usage.mem?.available_kB == null || usage.mem.available_kB >= spec.memoryMiB * 1024
-      const diskOk = usage.disk?.available_kB == null || usage.disk.available_kB >= spec.diskMiB * 1024
-      const activeOk = usage.active !== false
-
-      return cpuOk && memoryOk && diskOk && activeOk
-    })
-    .sort((left, right) => {
-      const rightScore = toNumber(right.score)
-      const leftScore = toNumber(left.score)
-      const normalizedRight = Number.isFinite(rightScore) ? rightScore : Number.NEGATIVE_INFINITY
-      const normalizedLeft = Number.isFinite(leftScore) ? leftScore : Number.NEGATIVE_INFINITY
-
-      if (normalizedRight !== normalizedLeft) return normalizedRight - normalizedLeft
-
-      const leftName = (left.name || left.address || left.hash).toLowerCase()
-      const rightName = (right.name || right.address || right.hash).toLowerCase()
-      return leftName.localeCompare(rightName)
-    })
+  return filterDeployableCrns(crns, { spec })
 }
 
 export function validateDeployment(args: {
