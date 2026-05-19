@@ -1,7 +1,8 @@
-import { ALEPH_TOKEN_CONTRACTS, EVM_CHAIN_CONFIG } from './config'
+import { ALEPH_TOKEN_CONTRACTS, EVM_CHAIN_CONFIG, PREPAID_VAULT_ADDRESS } from './config'
+import { ethCall, personalSign, sendTransaction } from '@le-space/browser'
 import { fetchWithTimeout } from './http'
 import { keccak_256 } from 'js-sha3'
-import type { PaymentChain } from './types'
+import type { AAWalletAssessment, PaymentChain, PrepaidEnforcementLevel } from './types'
 
 export interface WalletState {
   address: string
@@ -58,6 +59,11 @@ export async function connectWallet(provider = getEthereumProvider()): Promise<W
     chainId,
     isMetaMask: Boolean(provider.isMetaMask)
   }
+}
+
+function normalizeHex(value: string): `0x${string}` {
+  const normalized = value.startsWith('0x') ? value.toLowerCase() : `0x${value.toLowerCase()}`
+  return normalized as `0x${string}`
 }
 
 export async function switchPaymentChain(chain: PaymentChain, provider = getEthereumProvider()): Promise<void> {
@@ -129,19 +135,87 @@ export async function fetchAlephTokenBalance(address: string, chain: PaymentChai
   return formatTokenUnits(BigInt(hexToDecimalString(payload.result)))
 }
 
-export async function personalSign(
+export async function getContractCode(
   address: string,
-  message: string,
   provider = getEthereumProvider()
 ): Promise<string> {
   if (!provider) throw new Error('MetaMask provider not found.')
 
-  const hexMessage = `0x${Array.from(new TextEncoder().encode(message))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')}`
-
   return provider.request<string>({
-    method: 'personal_sign',
-    params: [hexMessage, address]
+    method: 'eth_getCode',
+    params: [address, 'latest']
   })
 }
+
+export async function ethCallLocal(
+  to: string,
+  data: `0x${string}`,
+  provider = getEthereumProvider()
+): Promise<string> {
+  return ethCall(to, data, provider)
+}
+
+export async function sendTransactionLocal(
+  tx: {
+    from: string
+    to: string
+    data?: `0x${string}`
+    value?: bigint
+  },
+  provider = getEthereumProvider()
+): Promise<string> {
+  return sendTransaction(tx, provider)
+}
+
+export async function assessAAWallet(
+  address: string,
+  provider = getEthereumProvider()
+): Promise<AAWalletAssessment> {
+  const code = await getContractCode(address, provider)
+  const normalizedCode = normalizeHex(code)
+  const hasCode = normalizedCode !== '0x'
+
+  let kind: AAWalletAssessment['kind'] = 'unknown'
+  let enforcementLevel: PrepaidEnforcementLevel = 'none'
+  const warnings: string[] = []
+
+  if (!hasCode) {
+    kind = 'eoa'
+    enforcementLevel = 'soft-gate'
+    warnings.push('Connected address has no deployed code. ERC-4337-style hard enforcement is not available on this address.')
+    warnings.push('EIP-7702 may still enable delegated code execution, but this PWA cannot prove that Aleph will enforce it for offchain message signatures.')
+  } else {
+    kind = 'smart-account'
+    enforcementLevel = PREPAID_VAULT_ADDRESS ? 'contract-signature-ready' : 'soft-gate'
+    warnings.push('Connected address has deployed code. This looks compatible with a smart-account flow, but Aleph contract-signature support still needs upstream validation.')
+  }
+
+  return {
+    ownerAddress: address,
+    codeHash: hasCode ? normalizedCode : null,
+    hasCode,
+    kind,
+    supportsContractSignatures: hasCode,
+    enforcementLevel,
+    warnings
+  }
+}
+
+export function parseUint256Hex(value: string): bigint {
+  const normalized = normalizeHex(value)
+  if (!/^0x[0-9a-f]+$/i.test(normalized)) {
+    throw new Error(`Invalid uint256 hex value: ${value}`)
+  }
+
+  return BigInt(normalized)
+}
+
+export async function personalSignLocal(
+  address: string,
+  message: string,
+  provider = getEthereumProvider()
+): Promise<string> {
+  return personalSign(address, message, provider)
+}
+
+export { ethCallLocal as ethCall, personalSignLocal as personalSign, sendTransactionLocal as sendTransaction }
