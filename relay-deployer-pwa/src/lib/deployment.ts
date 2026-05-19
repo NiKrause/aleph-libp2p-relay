@@ -1,7 +1,11 @@
 import {
+  buildPaymentQuote,
   createReleaseMetadata as createSharedReleaseMetadata,
   isValidSshPublicKey,
-  normalizeSshPublicKey
+  normalizeSshPublicKey,
+  quoteRequiredBudgetUnits,
+  selectedTier,
+  tierSpec
 } from '@le-space/core'
 import {
   DEFAULT_BASE_ROOTFS,
@@ -16,12 +20,10 @@ import type {
   Crn,
   DeploymentForm,
   DeploymentValidation,
-  InstancePricing,
   PaymentQuote,
   PricingState,
   RootfsManifest,
   RootfsResolution,
-  Tier,
   TierSpec
 } from './types'
 
@@ -34,18 +36,6 @@ export const DEFAULT_DEPLOYMENT_FORM: DeploymentForm = {
   baseRootfs: DEFAULT_BASE_ROOTFS,
   tierId: 'tier-1',
   selectedCrnHash: ''
-}
-
-export function selectedTier(pricing: InstancePricing | null, tierId: string): Tier | null {
-  return pricing?.tiers.find((tier) => tier.id === tierId) ?? null
-}
-
-export function tierSpec(pricing: InstancePricing, tier: Tier): TierSpec {
-  return {
-    vcpus: pricing.compute_unit.vcpus * tier.compute_units,
-    memoryMiB: pricing.compute_unit.memory_mib * tier.compute_units,
-    diskMiB: pricing.compute_unit.disk_mib * tier.compute_units
-  }
 }
 
 export function compatibleCrns(crns: Crn[], spec: TierSpec): Crn[] {
@@ -75,20 +65,6 @@ export function compatibleCrns(crns: Crn[], spec: TierSpec): Crn[] {
       const rightName = (right.name || right.address || right.hash).toLowerCase()
       return leftName.localeCompare(rightName)
     })
-}
-
-export function buildPaymentQuote(tier: Tier, pricing: InstancePricing, balance: BalanceResponse): PaymentQuote | null {
-  const computeUnitPrice = pricing.price.compute_unit
-  if (!computeUnitPrice) return null
-
-  const unitPrice = toNumber(computeUnitPrice.credit)
-  return {
-    required: unitPrice * tier.compute_units,
-    available: Number(balance.credit_balance ?? 0),
-    computeUnits: tier.compute_units,
-    unitPrice,
-    label: 'credits'
-  }
 }
 
 export function validateDeployment(args: {
@@ -172,11 +148,6 @@ export function createReleaseMetadata(name: string, rootfsVersion: string) {
   return createSharedReleaseMetadata(name, rootfsVersion, 'aleph-relay-deployer-pwa')
 }
 
-export function quoteRequiredBudgetUnits(quote: PaymentQuote | null): bigint {
-  if (!quote) return 0n
-  return BigInt(Math.ceil(quote.required * 1_000_000_000_000_000_000))
-}
-
 export function prepaidValidationErrors(args: {
   aaWallet: AAWalletAssessment | null
   quote: PaymentQuote | null
@@ -210,5 +181,12 @@ export function prepaidValidationErrors(args: {
   return errors
 }
 
-export { isValidSshPublicKey, normalizeSshPublicKey }
+export {
+  buildPaymentQuote,
+  isValidSshPublicKey,
+  normalizeSshPublicKey,
+  quoteRequiredBudgetUnits,
+  selectedTier,
+  tierSpec
+}
 export { ALEPH_DEFAULT_CHANNEL }

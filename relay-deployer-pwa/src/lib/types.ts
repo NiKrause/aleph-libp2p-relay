@@ -30,6 +30,10 @@ import type {
   Tier as SharedTier
 } from '@le-space/browser'
 import type {
+  PaymentQuote as SharedPaymentQuote,
+  TierSpec as SharedTierSpec
+} from '@le-space/core'
+import type {
   AlephAggregateContent as SharedAlephAggregateContent,
   AlephInstanceContent as SharedAlephInstanceContent,
   DeploymentIntentEnvelope as SharedDeploymentIntentEnvelope
@@ -63,19 +67,9 @@ export type CrnLocation = SharedCrnLocation
 export type Crn = SharedCrn
 export type CrnListResponse = SharedCrnListResponse
 
-export interface TierSpec {
-  vcpus: number
-  memoryMiB: number
-  diskMiB: number
-}
+export type TierSpec = SharedTierSpec
 
-export interface PaymentQuote {
-  required: number
-  available: number
-  computeUnits: number
-  unitPrice: number
-  label: 'credits'
-}
+export type PaymentQuote = SharedPaymentQuote
 
 export interface DeploymentForm {
   name: string
