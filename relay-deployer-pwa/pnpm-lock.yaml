@@ -23,6 +23,9 @@ importers:
       '@le-space/rootfs':
         specifier: ^0.1.20
         version: 0.1.20
+      '@le-space/shared-types':
+        specifier: ^0.1.33
+        version: 0.1.33
       js-sha3:
         specifier: ^0.9.3
         version: 0.9.3

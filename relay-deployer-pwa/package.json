@@ -16,6 +16,7 @@
     "@le-space/browser": "^0.1.32",
     "@le-space/rootfs": "^0.1.20",
     "@le-space/core": "^0.1.33",
+    "@le-space/shared-types": "^0.1.33",
     "@aleph-sdk/client": "^1.7.4",
     "@aleph-sdk/ethereum": "^1.8.0",
     "js-sha3": "^0.9.3",

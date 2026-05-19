@@ -1,135 +1,67 @@
+import type {
+  AlephBroadcastMessage as SharedAlephBroadcastMessage,
+  AlephBroadcastResponse as SharedAlephBroadcastResponse,
+  AlephMessageType as SharedAlephMessageType,
+  AlephSenderChain as SharedAlephSenderChain,
+  BalanceResponse as SharedBalanceResponse,
+  ComputeUnit as SharedComputeUnit,
+  Crn as SharedCrn,
+  CrnListResponse as SharedCrnListResponse,
+  CrnLocation as SharedCrnLocation,
+  CrnUsage as SharedCrnUsage,
+  InstanceAllocation as SharedInstanceAllocation,
+  InstanceAllocationNode as SharedInstanceAllocationNode,
+  InstanceAllocationPeriod as SharedInstanceAllocationPeriod,
+  InstanceExecution as SharedInstanceExecution,
+  InstanceExecutionNetworking as SharedInstanceExecutionNetworking,
+  InstanceExecutionStatus as SharedInstanceExecutionStatus,
+  InstanceMessage as SharedInstanceMessage,
+  InstancePortMapping as SharedInstancePortMapping,
+  InstancePricing as SharedInstancePricing,
+  MessageReference as SharedMessageReference,
+  MessageStatus as SharedMessageStatus,
+  Price as SharedPrice,
+  PricingState as SharedPricingState,
+  ReferenceStatus as SharedReferenceStatus,
+  RootfsManifest as SharedRootfsManifest,
+  RootfsManifestState as SharedRootfsManifestState,
+  RootfsRequiredPortForward as SharedRootfsRequiredPortForward,
+  RootfsResolution as SharedRootfsResolution,
+  Tier as SharedTier
+} from '@le-space/browser'
+import type {
+  AlephAggregateContent as SharedAlephAggregateContent,
+  AlephInstanceContent as SharedAlephInstanceContent,
+  DeploymentIntentEnvelope as SharedDeploymentIntentEnvelope
+} from '@le-space/shared-types'
+
 export type PaymentMode = 'hold' | 'credit'
 export type PaymentChain = 'BASE' | 'AVAX' | 'ETH'
-export type AlephSenderChain = 'ETH'
-export type AlephMessageType = 'INSTANCE' | 'FORGET' | 'AGGREGATE'
-export type MessageStatus = 'processed' | 'pending' | 'rejected' | 'unknown'
-export type ReferenceStatus = MessageStatus | 'missing'
+export type AlephSenderChain = SharedAlephSenderChain
+export type AlephMessageType = SharedAlephMessageType
+export type MessageStatus = SharedMessageStatus
+export type ReferenceStatus = SharedReferenceStatus
 export type GatewayProbeStatus = 'reachable' | 'timeout' | 'error' | 'unavailable' | 'unknown'
 export type RootfsInstallStrategy = 'thin' | 'prebaked'
 export type RootfsSourceMode = 'base' | 'custom'
 export type AlephBaseRootfs = 'ubuntu22' | 'debian12'
 
-export interface RootfsRequiredPortForward {
-  port: number
-  tcp?: boolean
-  udp?: boolean
-  purpose?: string
-}
-
-export interface RootfsManifest {
-  profile?: string
-  version: string
-  rootfsInstallStrategy?: RootfsInstallStrategy
-  requiresBootstrapNetwork?: boolean
-  bootstrapSummary?: string
-  requiredPortForwards?: RootfsRequiredPortForward[]
+export type RootfsRequiredPortForward = SharedRootfsRequiredPortForward
+export type RootfsManifest = SharedRootfsManifest & {
   rootfsItemHash: string
-  rootfsSizeMiB: number
-  rootfsSourceSizeBytes?: number
-  createdAt: string
-  notes?: string
 }
-
-export interface RootfsManifestState {
-  manifest: RootfsManifest | null
-  valid: boolean
-  errors: string[]
-}
-
-export interface RootfsResolution {
-  itemHash: string
-  messageStatus: MessageStatus
-  messageType: string | null
-  cid: string | null
-  receptionTime?: string | null
-  rejectionErrorCode?: number | null
-  rejectionReason?: string | null
-  gatewayUrl: string | null
-  gatewayStatus: GatewayProbeStatus
-  gatewayError?: string | null
-}
-
-export interface BalanceResponse {
-  address: string
-  balance: string
-  locked_amount: string
-  details?: Record<string, string>
-  credit_balance: number
-}
-
-export interface Price {
-  payg?: string | number | null
-  holding?: string | number | null
-  fixed?: string | number | null
-  credit?: string | number | null
-}
-
-export interface ComputeUnit {
-  vcpus: number
-  memory_mib: number
-  disk_mib: number
-}
-
-export interface Tier {
-  id: string
-  compute_units: number
-  vram?: number | null
-  model?: string | null
-}
-
-export interface InstancePricing {
-  price: {
-    storage?: Price
-    compute_unit?: Price
-  }
-  compute_unit: ComputeUnit
-  tiers: Tier[]
-}
-
-export interface PricingState {
-  pricing: InstancePricing | null
-  fetchedAt: number | null
-}
-
-export interface CrnUsage {
-  cpu?: { count?: number }
-  mem?: { available_kB?: number }
-  disk?: { available_kB?: number }
-  active?: boolean
-}
-
-export interface CrnLocation {
-  city?: string | null
-  region?: string | null
-  country?: string | null
-  country_code?: string | null
-}
-
-export interface Crn {
-  hash: string
-  name: string
-  address: string
-  score?: number | string | null
-  performance?: number | string | null
-  decentralization?: number | string | null
-  qemu_support?: boolean
-  confidential_support?: boolean
-  gpu_support?: boolean
-  system_usage?: CrnUsage | null
-  payment_receiver_address?: string | null
-  version?: string | null
-  city?: string | null
-  region?: string | null
-  country?: string | null
-  country_code?: string | null
-  location?: CrnLocation | string | null
-  resolved_ip?: string | null
-  geo_source?: string | null
-}
-
-export interface CrnListResponse {
-  crns: Crn[]
-}
+export type RootfsManifestState = SharedRootfsManifestState
+export type RootfsResolution = SharedRootfsResolution
+export type BalanceResponse = SharedBalanceResponse
+export type Price = SharedPrice
+export type ComputeUnit = SharedComputeUnit
+export type Tier = SharedTier
+export type InstancePricing = SharedInstancePricing
+export type PricingState = SharedPricingState
+export type CrnUsage = SharedCrnUsage
+export type CrnLocation = SharedCrnLocation
+export type Crn = SharedCrn
+export type CrnListResponse = SharedCrnListResponse
 
 export interface TierSpec {
   vcpus: number
@@ -190,9 +122,8 @@ export interface DeploymentIntent {
   maxCost: string
 }
 
-export interface DeploymentIntentEnvelope {
+export type DeploymentIntentEnvelope = Omit<SharedDeploymentIntentEnvelope, 'intent'> & {
   intent: DeploymentIntent
-  intentHash: string
 }
 
 export interface PrepaidReservation {
@@ -219,52 +150,14 @@ export interface PrepaidVaultState {
   warnings: string[]
 }
 
-export interface AlephInstanceContent {
-  address: string
-  time: number
-  allow_amend: boolean
-  metadata?: { name: string; [key: string]: string | number | boolean }
-  authorized_keys?: string[]
-  environment: {
-    internet: boolean
-    aleph_api: boolean
-    reproducible?: boolean
-    shared_cache?: boolean
-    hypervisor: 'qemu'
-    trusted_execution?: Record<string, unknown>
-  }
-  resources: {
-    vcpus: number
-    memory: number
-    seconds: number
-  }
-  payment: {
+export type AlephInstanceContent = Omit<SharedAlephInstanceContent, 'payment'> & {
+  payment: Omit<SharedAlephInstanceContent['payment'], 'chain' | 'type'> & {
     chain?: PaymentChain
-    receiver?: string
     type: PaymentMode
-  }
-  requirements?: {
-    node?: {
-      node_hash: string
-    }
-  }
-  volumes: unknown[]
-  rootfs: {
-    parent: {
-      ref: string
-      use_latest?: boolean
-    }
-    persistence: 'host' | 'store'
-    size_mib: number
   }
 }
 
-export interface AlephAggregateContent<T = Record<string, unknown>> {
-  address: string
-  key: string
-  content: T
-  time: number
-}
+export type AlephAggregateContent<T = Record<string, unknown>> = SharedAlephAggregateContent<T>
 
 export interface AlephForgetContent {
   address: string
@@ -274,32 +167,9 @@ export interface AlephForgetContent {
   reason?: string
 }
 
-export interface AlephBroadcastMessage {
-  sender: string
-  chain: AlephSenderChain
-  signature: string
-  type: AlephMessageType
-  item_hash: string
-  item_type: 'inline'
-  item_content: string
-  time: number
-  channel: string
-}
-
-export interface AlephBroadcastResponse {
-  publication_status?: {
-    status: string
-    failed?: unknown[]
-  }
-  message_status?: MessageStatus
-  [key: string]: unknown
-}
-
-export interface MessageReference {
-  itemHash: string
-  status: ReferenceStatus
-  type: string | null
-}
+export type AlephBroadcastMessage = SharedAlephBroadcastMessage
+export type AlephBroadcastResponse = SharedAlephBroadcastResponse
+export type MessageReference = SharedMessageReference
 
 export interface DeploymentResult {
   itemHash: string
@@ -312,26 +182,9 @@ export interface DeploymentResult {
   details?: Record<string, unknown> | null
 }
 
-export interface InstanceAllocationNode {
-  node_id?: string
-  url?: string
-  ipv6?: string | null
-  supports_ipv6?: boolean
-}
-
-export interface InstanceAllocationPeriod {
-  start_timestamp?: string
-  duration_seconds?: number
-}
-
-export interface InstanceAllocation {
-  source: 'scheduler' | 'manual'
-  crnHash?: string | null
-  crnUrl?: string | null
-  node?: InstanceAllocationNode | null
-  vmIpv6?: string | null
-  period?: InstanceAllocationPeriod | null
-}
+export type InstanceAllocationNode = SharedInstanceAllocationNode
+export type InstanceAllocationPeriod = SharedInstanceAllocationPeriod
+export type InstanceAllocation = SharedInstanceAllocation
 
 export interface PortForwardFlags {
   tcp: boolean
@@ -344,41 +197,10 @@ export interface PortForwardAggregateEntry {
 
 export type PortForwardAggregate = Record<string, PortForwardAggregateEntry>
 
-export interface InstancePortMapping {
-  host?: number
-  tcp?: boolean
-  udp?: boolean
-}
-
-export interface InstanceExecutionStatus {
-  defined_at?: string | null
-  preparing_at?: string | null
-  prepared_at?: string | null
-  starting_at?: string | null
-  started_at?: string | null
-  stopping_at?: string | null
-  stopped_at?: string | null
-}
-
-export interface InstanceExecutionNetworking {
-  ipv4?: string | null
-  ipv6?: string | null
-  ipv4_network?: string | null
-  host_ipv4?: string | null
-  ipv6_network?: string | null
-  ipv6_ip?: string | null
-  ipv4_ip?: string | null
-  proxy_url?: string | null
-  mapped_ports?: Record<string, InstancePortMapping>
-}
-
-export interface InstanceExecution {
-  crnUrl: string
-  version: 'v1' | 'v2'
-  running?: boolean
-  networking: InstanceExecutionNetworking
-  status?: InstanceExecutionStatus | null
-}
+export type InstancePortMapping = SharedInstancePortMapping
+export type InstanceExecutionStatus = SharedInstanceExecutionStatus
+export type InstanceExecutionNetworking = SharedInstanceExecutionNetworking
+export type InstanceExecution = SharedInstanceExecution
 
 export interface InstanceRuntimeDetails {
   messageStatus: MessageStatus
@@ -389,20 +211,4 @@ export interface InstanceRuntimeDetails {
   error?: string | null
 }
 
-export interface InstanceMessage {
-  item_hash: string
-  sender: string
-  chain: string
-  type: 'INSTANCE'
-  channel?: string
-  content?: {
-    metadata?: { name?: string }
-    payment?: { type?: PaymentMode; chain?: string }
-    rootfs?: { parent?: { ref?: string }; size_mib?: number }
-    requirements?: { node?: { node_hash?: string } }
-  }
-  time?: string | number
-  reception_time?: string
-  confirmed?: boolean
-  status?: string
-}
+export type InstanceMessage = SharedInstanceMessage
