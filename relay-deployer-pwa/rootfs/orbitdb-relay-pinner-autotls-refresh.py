@@ -13,7 +13,14 @@ READY_FILE = os.environ.get("READY_FILE", "/etc/default/orbitdb-relay-pinner.rea
 AUTOTLS_READY_FILE = os.environ.get(
     "AUTOTLS_READY_FILE", "/etc/default/orbitdb-relay-pinner.autotls-ready"
 )
+AUTOTLS_ZONE_FILE = os.environ.get("AUTOTLS_ZONE_FILE", "/etc/default/orbitdb-relay-pinner.autotls-zone")
+AUTOTLS_HOSTS_FILE = os.environ.get("AUTOTLS_HOSTS_FILE", "/etc/default/orbitdb-relay-pinner.autotls-hosts")
+AUTOTLS_CADDY_READY_FILE = os.environ.get(
+    "AUTOTLS_CADDY_READY_FILE", "/etc/default/orbitdb-relay-pinner.caddy-ready"
+)
 SERVICE_NAME = os.environ.get("SERVICE_NAME", "orbitdb-relay-pinner.service")
+CADDY_SERVICE = os.environ.get("CADDY_SERVICE", "caddy.service")
+CADDYFILE = os.environ.get("CADDYFILE", "/etc/caddy/Caddyfile")
 METRICS_PORT = int(os.environ.get("METRICS_PORT", "9090"))
 WAIT_TIMEOUT_SECONDS = int(os.environ.get("AUTOTLS_WAIT_TIMEOUT_SECONDS", "900"))
 WAIT_INTERVAL_SECONDS = float(os.environ.get("AUTOTLS_WAIT_INTERVAL_SECONDS", "5"))
@@ -142,6 +149,19 @@ def build_secure_addrs(env_values: dict[str, str], zone: str) -> list[str]:
     return addrs
 
 
+def secure_hosts(env_values: dict[str, str], zone: str) -> list[str]:
+    hosts: list[str] = []
+    public_ipv4 = env_values.get("PUBLIC_IPV4", "").strip()
+    if public_ipv4:
+        hosts.append(ipv4_domain(public_ipv4, zone))
+
+    public_ipv6 = env_values.get("PUBLIC_IPV6", "").strip()
+    if public_ipv6:
+        hosts.append(ipv6_domain(public_ipv6, zone))
+
+    return dedupe(hosts)
+
+
 def metrics_https_public_host(env_values: dict[str, str], zone: str) -> str | None:
     public_ipv4 = env_values.get("PUBLIC_IPV4", "").strip()
     if public_ipv4:
@@ -161,6 +181,7 @@ def main() -> None:
     env_values = parse_env_file(ENV_FILE)
     zone = wait_for_autotls_zone()
     secure_addrs = build_secure_addrs(env_values, zone)
+    exact_hosts = secure_hosts(env_values, zone)
     metrics_host = metrics_https_public_host(env_values, zone)
     current_value = env_values.get("VITE_APPEND_ANNOUNCE", "")
     current_metrics_host = env_values.get("METRICS_HTTPS_PUBLIC_HOST", "").strip()
@@ -176,10 +197,25 @@ def main() -> None:
     if metrics_host:
         write_env_var(ENV_FILE, "METRICS_HTTPS_PUBLIC_HOST", metrics_host)
 
+    with open(AUTOTLS_HOSTS_FILE, "w", encoding="utf-8") as handle:
+        for host in exact_hosts:
+            handle.write(f"{host}\n")
+    with open(AUTOTLS_ZONE_FILE, "w", encoding="utf-8") as handle:
+        handle.write(f"{zone}\n")
+
     if announce_changed or metrics_host_changed:
         subprocess.run(["systemctl", "restart", SERVICE_NAME], check=True)
     else:
         print("AutoTLS secure external announce addresses already present")
+
+    if env_values.get("PROXY_HOSTNAME", "").strip():
+        open(AUTOTLS_CADDY_READY_FILE, "a", encoding="utf-8").close()
+        if os.path.exists(CADDYFILE):
+            subprocess.run(["systemctl", "enable", CADDY_SERVICE], check=False)
+            subprocess.run(["systemctl", "restart", CADDY_SERVICE], check=False)
+    elif os.path.exists(AUTOTLS_CADDY_READY_FILE):
+        os.remove(AUTOTLS_CADDY_READY_FILE)
+
     open(AUTOTLS_READY_FILE, "a", encoding="utf-8").close()
     print(f"Updated VITE_APPEND_ANNOUNCE={announce_value}")
 

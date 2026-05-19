@@ -4,13 +4,16 @@ set -euo pipefail
 ENV_FILE="${ENV_FILE:-/etc/default/orbitdb-relay-pinner}"
 READY_FILE="${READY_FILE:-/etc/default/orbitdb-relay-pinner.ready}"
 AUTOTLS_READY_FILE="${AUTOTLS_READY_FILE:-/etc/default/orbitdb-relay-pinner.autotls-ready}"
+AUTOTLS_ZONE_FILE="${AUTOTLS_ZONE_FILE:-/etc/default/orbitdb-relay-pinner.autotls-zone}"
+AUTOTLS_HOSTS_FILE="${AUTOTLS_HOSTS_FILE:-/etc/default/orbitdb-relay-pinner.autotls-hosts}"
 SERVICE_NAME="${SERVICE_NAME:-orbitdb-relay-pinner.service}"
 CADDY_SERVICE="${CADDY_SERVICE:-caddy.service}"
 CADDY_READY_FILE="${CADDY_READY_FILE:-/etc/default/orbitdb-relay-pinner.caddy-ready}"
 CADDYFILE="${CADDYFILE:-/etc/caddy/Caddyfile}"
+CADDY_UPSTREAM_WSS_PORT="${CADDY_UPSTREAM_WSS_PORT:-9092}"
 CADDY_UPSTREAM_HOST="${CADDY_UPSTREAM_HOST:-127.0.0.1}"
-CADDY_UPSTREAM_WS_PORT="${CADDY_UPSTREAM_WS_PORT:-9092}"
 CADDY_UPSTREAM_METRICS_PORT="${CADDY_UPSTREAM_METRICS_PORT:-9090}"
+AUTOTLS_REFRESH_SERVICE="${AUTOTLS_REFRESH_SERVICE:-orbitdb-relay-pinner-autotls-refresh.service}"
 PUBLIC_IPV4=""
 PUBLIC_IPV6=""
 TCP_PORT=""
@@ -66,7 +69,7 @@ ${hostname} {
     reverse_proxy 127.0.0.1:${CADDY_UPSTREAM_METRICS_PORT}
   }
 
-  reverse_proxy ${CADDY_UPSTREAM_HOST}:${CADDY_UPSTREAM_WS_PORT}
+  reverse_proxy ${CADDY_UPSTREAM_HOST}:${CADDY_UPSTREAM_WSS_PORT}
 }
 EOF
 }
@@ -131,7 +134,7 @@ if [ -z "${PUBLIC_IPV4}" ] || [ -z "${TCP_PORT}" ] || [ -z "${WS_PORT}" ]; then
 fi
 
 touch "${ENV_FILE}"
-rm -f "${AUTOTLS_READY_FILE}"
+rm -f "${AUTOTLS_READY_FILE}" "${AUTOTLS_ZONE_FILE}" "${AUTOTLS_HOSTS_FILE}"
 
 announce=(
   "/ip4/${PUBLIC_IPV4}/tcp/${TCP_PORT}"
@@ -177,6 +180,8 @@ write_env_var "EXTERNAL_RELAY_TCP_PORT" "${TCP_PORT}"
 write_env_var "EXTERNAL_RELAY_WS_PORT" "${WS_PORT}"
 if [ -n "${PROXY_HOSTNAME}" ]; then
   write_env_var "PROXY_HOSTNAME" "${PROXY_HOSTNAME}"
+else
+  write_env_var "PROXY_HOSTNAME" ""
 fi
 if [ -n "${METRICS_PORT}" ]; then
   write_env_var "EXTERNAL_METRICS_PORT" "${METRICS_PORT}"
@@ -196,6 +201,7 @@ if [ "${START_SERVICE}" -eq 1 ]; then
   systemctl daemon-reload
   systemctl enable "${SERVICE_NAME}"
   systemctl restart "${SERVICE_NAME}"
+  systemctl enable "${AUTOTLS_REFRESH_SERVICE}"
   if [ -n "${PROXY_HOSTNAME}" ]; then
     write_caddyfile "${PROXY_HOSTNAME}"
     touch "${CADDY_READY_FILE}"
@@ -205,6 +211,7 @@ if [ "${START_SERVICE}" -eq 1 ]; then
     rm -f "${CADDY_READY_FILE}"
     systemctl stop "${CADDY_SERVICE}" || true
   fi
+  systemctl restart --no-block "${AUTOTLS_REFRESH_SERVICE}"
 fi
 
 printf 'Configured VITE_APPEND_ANNOUNCE=%s\n' "${announce_value}"

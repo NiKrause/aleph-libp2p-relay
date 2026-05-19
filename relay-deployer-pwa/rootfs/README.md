@@ -323,6 +323,9 @@ flowchart TD
 - Configure helper: `/usr/local/sbin/orbitdb-relay-pinner-configure.sh`
 - Setup endpoint service: `orbitdb-relay-pinner-bootstrap.service`
 - Ready file: `/etc/default/orbitdb-relay-pinner.ready`
+- AutoTLS refresh service: `orbitdb-relay-pinner-autotls-refresh.service`
+- Describe helper: `/usr/local/sbin/orbitdb-relay-pinner-describe.py`
+- Metadata file: `/run/orbitdb-relay-pinner-setup-metadata.json`
 
 The OrbitDB profile copies the upstream `deploy/orbitdb-relay-pinner.service`
 and `deploy/orbitdb-relay-pinner.env.example` from the source checkout into the
@@ -352,14 +355,19 @@ That endpoint runs:
 After a successful configure call it writes `VITE_APPEND_ANNOUNCE`, creates the
 ready file, persists external relay/metrics host port mapping values in
 `/etc/default/orbitdb-relay-pinner`, starts the relay with the prebaked runtime,
-and shuts the temporary HTTP endpoint down. When a proxy hostname is passed in,
-the configure step appends secure `/dns4/.../tls/ws` and `/dns6/.../tls/ws`
+and restarts the AutoTLS refresh path. When a proxy hostname is passed in, the
+configure step appends secure `/dns4/.../tls/ws` and `/dns6/.../tls/ws`
 multiaddrs for that hostname, writes `/etc/caddy/Caddyfile`, and starts a local
 Caddy instance to terminate HTTPS/WSS in front of the relay's internal `9092`
-WebSocket listener. The secure
-`/tls/ws` suffix is still intentional here: it describes the externally
-reachable transport exposed by Caddy, even though relay-side AutoTLS is
-disabled.
+WebSocket listener. The secure `/tls/ws` suffix is still intentional here: it
+describes the externally reachable transport exposed by Caddy, even though
+relay-side AutoTLS is disabled.
+
+Unlike the older one-shot setup path, the temporary setup endpoint now also
+keeps a `/metadata` route alive until it can return a describe payload derived
+from the running relay's `/health` and `/multiaddrs` APIs. That payload
+includes the peer id, grouped probe/bootstrap multiaddrs, the AutoTLS serving
+zone when available, and the metrics HTTPS summary.
 
 ### Operational Notes
 
@@ -367,6 +375,8 @@ disabled.
   `/etc/default/orbitdb-relay-pinner.ready`
 - `orbitdb-relay-pinner-bootstrap.service` is only the temporary setup server
 - `caddy.service` is gated by `/etc/default/orbitdb-relay-pinner.caddy-ready`
+- `orbitdb-relay-pinner-autotls-refresh.service` persists exact secure announce
+  addresses and AutoTLS host metadata after the relay starts
 - if the bootstrap service is active and the relay service is skipped because of
   `ConditionPathExists=/etc/default/orbitdb-relay-pinner.ready`, the relay has
   not been configured yet
@@ -410,6 +420,7 @@ Once configured, you can verify the persisted external secure announce entries:
 ```bash
 curl -sS http://127.0.0.1:9090/multiaddrs
 grep '^VITE_APPEND_ANNOUNCE=' /etc/default/orbitdb-relay-pinner
+curl -sS http://127.0.0.1/metadata || true
 sed -n '1,160p' /etc/caddy/Caddyfile
 ```
 
@@ -421,6 +432,20 @@ Caddy front door, not at relay-side AutoTLS, for example:
 /dns4/PROXY_HOSTNAME/tcp/443/tls/ws
 /dns6/PROXY_HOSTNAME/tcp/443/tls/ws
 ```
+
+The OrbitDB profile now behaves more like the current `uc-go-peer` deployment
+model in one important way: first-boot configuration is no longer just "write
+env vars and hope the service is up." It is now a small lifecycle:
+
+1. configure mapped ports and optional proxy hostname
+2. start the relay
+3. let AutoTLS settle and persist exact secure announce hints
+4. expose a final `/metadata` describe payload for downstream bootstrap
+   consumers
+
+The main difference from `uc-go-peer` is that OrbitDB still keeps its own local
+proxy/Caddy behavior and announces `443`-based secure websocket addresses for
+that front door when a proxy hostname is configured.
 
 ### `uc-rust-peer`
 

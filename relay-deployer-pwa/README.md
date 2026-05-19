@@ -55,8 +55,11 @@ VITE_PREPAID_RESERVATION_TTL_SECONDS=900
 
 The checked-in Solidity scaffold lives at
 [contracts/PrepaidBudgetVault.sol](/Users/nandi/Projects/aleph-libp2p-relay/relay-deployer-pwa/contracts/PrepaidBudgetVault.sol).
-This repo does not currently include a Solidity build pipeline, so treat that
-contract as source to deploy with your preferred toolchain.
+The repo now also includes a minimal local Foundry harness for that contract:
+
+- [contracts/README.md](/Users/nandi/Projects/aleph-libp2p-relay/relay-deployer-pwa/contracts/README.md)
+- `forge test`
+- `anvil` + `./script/anvil-smoke.sh`
 
 Important limitation:
 
@@ -138,7 +141,9 @@ endpoint then runs
 `/usr/local/sbin/orbitdb-relay-pinner-configure.sh`, writes
 `VITE_APPEND_ANNOUNCE` plus the external relay/metrics port mapping variables,
 creates `/etc/default/orbitdb-relay-pinner.ready`, starts
-`orbitdb-relay-pinner.service`, and shuts itself down.
+`orbitdb-relay-pinner.service`, and keeps the setup endpoint available until a
+follow-up `/metadata` fetch can read the describe payload generated from the
+running relay.
 
 For the OrbitDB profile, the relay's internal WebSocket listener is back on
 `9092`, AutoTLS is disabled in the service environment, and the setup step can
@@ -183,7 +188,8 @@ The setup endpoint then:
 - writes `VITE_APPEND_ANNOUNCE`
 - creates `/etc/default/orbitdb-relay-pinner.ready`
 - starts `orbitdb-relay-pinner.service`
-- shuts the temporary setup server down
+- starts the AutoTLS refresh path for exact secure announces
+- keeps `/metadata` available until the deployment metadata has been fetched
 - when the instance web proxy hostname is known, appends secure
   `/dns4|/dns6/.../tls/ws` announces for that hostname, writes
   `/etc/caddy/Caddyfile`, and starts Caddy so the public HTTPS/WSS front door

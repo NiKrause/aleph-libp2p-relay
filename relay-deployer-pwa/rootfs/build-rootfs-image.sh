@@ -225,6 +225,7 @@ case "${ROOTFS_PROFILE}" in
       --copy-in "${SCRIPT_DIR}/orbitdb-relay-pinner-configure.sh:/usr/local/sbin"
       --copy-in "${SCRIPT_DIR}/orbitdb-relay-pinner-autotls-refresh.py:/usr/local/sbin"
       --copy-in "${SCRIPT_DIR}/orbitdb-relay-pinner-setup-server.py:/usr/local/sbin"
+      --copy-in "${SCRIPT_DIR}/orbitdb-relay-pinner-describe.py:/usr/local/sbin"
       --copy-in "${SCRIPT_DIR}/orbitdb-relay-pinner-bootstrap.service:/etc/systemd/system"
       --copy-in "${SCRIPT_DIR}/orbitdb-relay-pinner-autotls-refresh.service:/etc/systemd/system"
       --copy-in "${SCRIPT_DIR}/orbitdb-relay-pinner-bootstrap.conf:/etc/systemd/system/orbitdb-relay-pinner.service.d"
@@ -233,6 +234,7 @@ case "${ROOTFS_PROFILE}" in
       --run-command "chmod 0755 /usr/local/sbin/orbitdb-relay-pinner-configure.sh"
       --run-command "chmod 0755 /usr/local/sbin/orbitdb-relay-pinner-autotls-refresh.py"
       --run-command "chmod 0755 /usr/local/sbin/orbitdb-relay-pinner-setup-server.py"
+      --run-command "chmod 0755 /usr/local/sbin/orbitdb-relay-pinner-describe.py"
       --run-command "cp /opt/orbitdb-relay-pinner/deploy/orbitdb-relay-pinner.service /etc/systemd/system/orbitdb-relay-pinner.service"
       --run-command "INSTALL_DIR=/opt/orbitdb-relay-pinner DATA_DIR=/var/lib/orbitdb-relay-pinner ENV_FILE=/etc/default/orbitdb-relay-pinner SERVICE_USER=orbitdb-relay /usr/local/sbin/orbitdb-relay-pinner-bootstrap.sh"
     )

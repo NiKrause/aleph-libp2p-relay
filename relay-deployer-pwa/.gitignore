@@ -4,3 +4,5 @@ dist-rootfs/
 .svelte-kit/
 .vite/
 *.log
+foundry-cache/
+foundry-out/
