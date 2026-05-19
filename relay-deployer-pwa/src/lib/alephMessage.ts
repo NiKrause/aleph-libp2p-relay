@@ -1,4 +1,5 @@
 import {
+  createDeploymentIntent as createSharedDeploymentIntent,
   createUnsignedInstanceMessage as createSharedUnsignedInstanceMessage,
   normalizeBroadcastStatus,
   signAlephMessage,
@@ -139,25 +140,22 @@ export async function createDeploymentIntent(args: {
   const expiresAt =
     args.expiresAt ?? Math.floor(Date.now() / 1000) + PREPAID_RESERVATION_TTL_SECONDS
   const maxCost = (args.quoteRequiredBudget ?? 0n).toString(10)
-  const intent = {
-    ownerAddress: args.sender,
-    messageTime,
-    itemHash: unsigned.item_hash,
-    paymentType: content.payment.type,
-    rootfsRef: content.rootfs.parent.ref,
-    rootfsSizeMiB: content.rootfs.size_mib,
+  const envelope = await createSharedDeploymentIntent({
+    sender: args.sender,
+    unsignedMessage: unsigned,
+    content,
     computeUnits: args.tier.compute_units,
-    vcpus: spec.vcpus,
-    memoryMiB: spec.memoryMiB,
-    crnHash: args.selectedCrn?.hash ?? null,
-    channel: unsigned.channel,
     expiresAt,
-    maxCost
-  } as const
+    maxCost,
+    hasher: keccak256Hex
+  })
 
   return {
-    intent,
-    intentHash: keccak256Hex(JSON.stringify(intent))
+    intent: {
+      ...envelope.intent,
+      paymentType: envelope.intent.paymentType as DeploymentIntentEnvelope['intent']['paymentType']
+    },
+    intentHash: envelope.intentHash
   }
 }
 

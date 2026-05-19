@@ -18,8 +18,8 @@ importers:
         specifier: ^0.1.32
         version: 0.1.32
       '@le-space/core':
-        specifier: ^0.1.20
-        version: 0.1.20
+        specifier: ^0.1.33
+        version: 0.1.33
       '@le-space/rootfs':
         specifier: ^0.1.20
         version: 0.1.20
@@ -929,14 +929,14 @@ packages:
   '@le-space/browser@0.1.32':
     resolution: {integrity: sha512-oEm42cFEx7SGamGUnX3teWhYaivYlh84fNVgC9m5GD68JaEQ1J/ZAuL69WWye0yuCSW4dg/LttaYpbJYMrYupA==}
 
-  '@le-space/core@0.1.20':
-    resolution: {integrity: sha512-Ird2/MqXUZPn5qTv1FX4saQ78CEboaynoXNW/7kc47JhuLr95Eok1Xr7zoZ6htQ7+H6qwvk5eXudW+wejzIVMA==}
+  '@le-space/core@0.1.33':
+    resolution: {integrity: sha512-3+tCPawhTyh8zryeaDDH5XpiYIFcCHtP5rR8VJipxN779FXf2z6Yq6V6uZd3+24m51jIRGVTFLUgOfSJmOR/2Q==}
 
   '@le-space/rootfs@0.1.20':
     resolution: {integrity: sha512-F0H/w88q6g/7rUdBCUYCZsP4K+INQEH7UmgfwSNHIJRppXF7VjIXLDR8efuwb7oYffpkt8CSUSsRnnySjlLQKQ==}
 
-  '@le-space/shared-types@0.1.20':
-    resolution: {integrity: sha512-GK+AYFmRVZOQWQ7rdrd60w3/LVnhVzFb1RQ32n+Awy8WIRj2T6YtqNRGno3ku4jjTTVpm+8eW57bsW5qn1hYIQ==}
+  '@le-space/shared-types@0.1.33':
+    resolution: {integrity: sha512-Rr5SNWgFk1k4ochuKfc7FAbh4VG6L1/jl0fGPCZPHbFRe5E3x54gQspIPuoSoTxverHLsZy+NlQh5zyohAwe7g==}
 
   '@metamask/abi-utils@2.0.4':
     resolution: {integrity: sha512-StnIgUB75x7a7AgUhiaUZDpCsqGp7VkNnZh2XivXkJ6mPkE83U8ARGQj5MbRis7VJY8BC5V1AbB1fjdh0hupPQ==}
@@ -3972,13 +3972,13 @@ snapshots:
 
   '@le-space/browser@0.1.32': {}
 
-  '@le-space/core@0.1.20':
+  '@le-space/core@0.1.33':
     dependencies:
-      '@le-space/shared-types': 0.1.20
+      '@le-space/shared-types': 0.1.33
 
   '@le-space/rootfs@0.1.20': {}
 
-  '@le-space/shared-types@0.1.20': {}
+  '@le-space/shared-types@0.1.33': {}
 
   '@metamask/abi-utils@2.0.4':
     dependencies:
