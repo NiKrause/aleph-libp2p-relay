@@ -33,6 +33,11 @@ pnpm build
 The output in `dist/` is fully static and can be served by any static host or
 published through IPFS/Aleph hosting.
 
+## Support
+
+If this project helps your Aleph or relay deployment work, you can support it
+via [GitHub Sponsors](https://github.com/sponsors/NiKrause).
+
 ## Prepaid AA Deployments
 
 The PWA now includes an optional prepaid deployment gate for AA-wallet-style
