@@ -1,3 +1,4 @@
+import { enrichCrnsWithGeo as enrichCrnsWithGeoShared } from '@le-space/core'
 import { crnHost, crnLocationLabel } from './format'
 import { fetchWithTimeout } from './http'
 import type { Crn } from './types'
@@ -149,82 +150,48 @@ async function waitForGeoLookupSlot(): Promise<void> {
   }
 }
 
-async function resolveHostIp(host: string): Promise<string | null> {
-  if (isIpAddress(host)) return host
-
-  for (const type of ['A', 'AAAA']) {
-    const url = new URL('https://dns.google/resolve')
-    url.searchParams.set('name', host)
-    url.searchParams.set('type', type)
-    url.searchParams.set('edns_client_subnet', '0.0.0.0/0')
-    logGeo('debug', `Resolving ${host} via DNS-over-HTTPS`, { type, url: url.toString() })
-
-    const response = await fetchWithTimeout(url, { cache: 'no-cache' }, DNS_RESOLVE_TIMEOUT_MS)
-    if (!response.ok) {
-      logGeo('warn', `DNS resolve failed for ${host}`, { type, status: response.status })
-      continue
-    }
-
-    const payload = (await response.json()) as {
-      Answer?: Array<{ data?: string; type?: number }>
-    }
-    const record = payload.Answer?.find((answer) => typeof answer.data === 'string' && answer.data.trim())
-    if (record?.data) {
-      logGeo('debug', `Resolved ${host}`, { type, ip: record.data.trim() })
-      return record.data.trim()
-    }
-  }
-
-  logGeo('warn', `No DNS answer found for ${host}`)
-  return null
-}
-
-async function lookupIpLocation(ip: string): Promise<CrnGeoCacheEntry> {
-  const url = new URL(`${COUNTRY_IS_API_BASE_URL}/${encodeURIComponent(ip)}`)
-  url.searchParams.set('fields', 'city,subdivision')
-  await waitForGeoLookupSlot()
-  logGeo('debug', `Looking up GeoIP for ${ip}`, { url: url.toString() })
-
-  const response = await fetchWithTimeout(url, { cache: 'no-cache' }, GEO_LOOKUP_TIMEOUT_MS)
-  if (!response.ok) {
-    throw new Error(`Geo lookup failed: ${response.status}`)
-  }
-
-  const payload = (await response.json()) as {
-    ip?: unknown
-    country?: unknown
-    city?: unknown
-    subdivision?: unknown
-  }
-  const countryCode = normalizeText(payload.country)?.toUpperCase() ?? null
-  logGeo('debug', `GeoIP response for ${ip}`, payload)
-
-  return {
-    fetchedAt: Date.now(),
-    ip: normalizeText(payload.ip) ?? ip,
-    city: normalizeText(payload.city),
-    region: normalizeText(payload.subdivision),
-    country: countryNameFromCode(countryCode),
-    country_code: countryCode,
-  }
-}
-
 async function resolveGeoEntry(host: string, fallback?: CrnGeoCacheEntry): Promise<CrnGeoCacheEntry> {
   try {
-    const ip = await resolveHostIp(host)
-    if (!ip) {
-      logGeo('warn', `Falling back to empty geo entry for ${host} because no IP could be resolved`)
-      return fallback ?? {
-        fetchedAt: Date.now(),
-        ip: null,
-        city: null,
-        region: null,
-        country: null,
-        country_code: null
-      }
+    if (!isIpAddress(host)) {
+      logGeo('debug', `Resolving ${host} via shared DNS-over-HTTPS and GeoIP helpers`)
     }
 
-    return await lookupIpLocation(ip)
+    const [enriched] = await enrichCrnsWithGeoShared(
+      [{ hash: `geo:${host}`, name: host, address: `https://${host}` }],
+      {
+        fetch: async (url, init) => {
+          const requestUrl = new URL(String(url), globalThis.location?.href ?? 'https://localhost')
+
+          if (requestUrl.hostname === 'api.country.is') {
+            await waitForGeoLookupSlot()
+            logGeo('debug', `Looking up GeoIP for ${host}`, { url: requestUrl.toString() })
+          } else if (requestUrl.hostname === 'dns.google') {
+            logGeo('debug', `Resolving ${host} via DNS-over-HTTPS`, { url: requestUrl.toString() })
+          }
+
+          const timeoutMs = requestUrl.hostname === 'dns.google' ? DNS_RESOLVE_TIMEOUT_MS : GEO_LOOKUP_TIMEOUT_MS
+          return await fetchWithTimeout(requestUrl, { ...init, cache: init?.cache ?? 'no-cache' }, timeoutMs)
+        },
+        dnsResolveUrl: 'https://dns.google/resolve',
+        countryLookupBaseUrl: COUNTRY_IS_API_BASE_URL
+      }
+    )
+
+    const entry: CrnGeoCacheEntry = {
+      fetchedAt: Date.now(),
+      ip: enriched?.resolved_ip ?? null,
+      city: enriched?.city ?? null,
+      region: enriched?.region ?? null,
+      country: enriched?.country ?? null,
+      country_code: enriched?.country_code ?? null
+    }
+
+    if (!entry.ip && !entry.city && !entry.region && !entry.country && !entry.country_code) {
+      logGeo('warn', `Falling back to empty geo entry for ${host} because no shared geo data could be resolved`)
+      return fallback ?? entry
+    }
+
+    return entry
   } catch (error) {
     logGeo('warn', `Geo enrichment failed for ${host}`, error instanceof Error ? error.message : error)
     return fallback ?? {
