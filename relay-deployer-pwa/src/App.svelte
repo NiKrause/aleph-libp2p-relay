@@ -2,11 +2,13 @@
   import { onMount } from 'svelte'
   import {
     configureOrbitdbRelaySetup,
+    fetchOrbitdbRelayMetadata,
     fetchBalance,
     fetchCrns,
     fetchInstanceRuntimeDetails,
     fetchInstances,
     notifyCrnAllocation,
+    waitForOrbitdbRelaySetupEndpoint,
     waitForDeploymentResult
   } from './lib/alephApi'
   import { deleteInstance } from './lib/alephForget'
@@ -101,6 +103,7 @@
   let instanceSetupAttempted: Record<string, string> = {}
   let instanceSetupPendingReachability: Record<string, string> = {}
   let instanceSshCopied: Record<string, boolean> = {}
+  let instanceHashCopied: Record<string, boolean> = {}
   let crnGeoLookupInFlight: Record<string, boolean> = {}
   let networkBusy = false
   let walletBusy = false
@@ -976,6 +979,23 @@
     }, 1600)
   }
 
+  async function copyInstanceHash(instance: InstanceMessage) {
+    if (!instance.item_hash || !navigator?.clipboard?.writeText) return
+
+    await navigator.clipboard.writeText(instance.item_hash)
+    instanceHashCopied = {
+      ...instanceHashCopied,
+      [instance.item_hash]: true
+    }
+
+    window.setTimeout(() => {
+      instanceHashCopied = {
+        ...instanceHashCopied,
+        [instance.item_hash]: false
+      }
+    }, 1600)
+  }
+
   function mappedPorts(instance: InstanceMessage) {
     return Object.entries(instanceDetails[instance.item_hash]?.execution?.networking?.mapped_ports ?? {})
   }
@@ -1089,7 +1109,7 @@
     const target = orbitdbSetupTarget(instance)
     if (!target) return null
 
-    return `Aleph has already published the mapped setup port ${target.hostIpv4}:${target.setupPort}, but that external CRN port-forward is not confirming reachability yet. The VM-side setup server can still be listening on internal port 80 for ${target.serviceName}.`
+    return `Aleph has already published the mapped setup port ${target.hostIpv4}:${target.setupPort}, but the browser could not yet confirm guest readiness through the temporary setup endpoint. The VM-side ${target.serviceName} setup may still be activating on internal port 80.`
   }
 
   async function configureOrbitdbRelayInstance(
@@ -1116,6 +1136,19 @@
     }
 
     try {
+      const setupHealth = await waitForOrbitdbRelaySetupEndpoint({
+        hostIpv4: target.hostIpv4,
+        setupPort: target.setupPort
+      })
+
+      if (setupHealth.status !== 'ready') {
+        throw new Error(
+          `Temporary setup endpoint did not become reachable at http://${target.hostIpv4}:${target.setupPort}/health${
+            setupHealth.lastError ? ` (${setupHealth.lastError})` : ''
+          }.`
+        )
+      }
+
       const result = await configureOrbitdbRelaySetup(target)
 
       instanceSetupAttempted = {
@@ -1124,19 +1157,41 @@
       }
 
       if (result.status === 'configured') {
-        instanceSetupPendingReachability = {
-          ...instanceSetupPendingReachability,
-          [instance.item_hash]: ''
-        }
-        instanceSetupApplied = {
-          ...instanceSetupApplied,
-          [instance.item_hash]: setupKey
-        }
-        instanceActionFeedback = {
-          ...instanceActionFeedback,
-          [instance.item_hash]: {
-            tone: 'info',
-            message: `Relay setup endpoint accepted the mapped ports and started ${target.serviceName}.`
+        const metadataResult = await fetchOrbitdbRelayMetadata({
+          hostIpv4: target.hostIpv4,
+          setupPort: target.setupPort
+        })
+
+        if (metadataResult.status === 'ready') {
+          instanceSetupPendingReachability = {
+            ...instanceSetupPendingReachability,
+            [instance.item_hash]: ''
+          }
+          instanceSetupApplied = {
+            ...instanceSetupApplied,
+            [instance.item_hash]: setupKey
+          }
+          instanceActionFeedback = {
+            ...instanceActionFeedback,
+            [instance.item_hash]: {
+              tone: 'info',
+              message: `Relay setup endpoint accepted the mapped ports, started ${target.serviceName}, and reported ready metadata.`
+            }
+          }
+        } else {
+          instanceSetupPendingReachability = {
+            ...instanceSetupPendingReachability,
+            [instance.item_hash]: setupKey
+          }
+          instanceActionFeedback = {
+            ...instanceActionFeedback,
+            [instance.item_hash]: {
+              tone: 'info',
+              message:
+                `Relay setup endpoint accepted the mapped ports for ${target.serviceName}, but the browser could not confirm ready metadata yet${
+                  metadataResult.lastError ? ` (${metadataResult.lastError})` : ''
+                }. Refresh or retry setup in a minute to verify whether guest metadata becomes ready.`
+            }
           }
         }
       } else {
@@ -1149,7 +1204,7 @@
           [instance.item_hash]: {
             tone: 'info',
             message:
-              `Relay setup request was sent to ${target.hostIpv4}:${target.setupPort}, but the browser could not confirm the response. Aleph already published that mapped host port, while the CRN may still be activating reachability for it. Refresh or retry setup in a minute to verify whether the VM accepted the mapped ports.`
+              `Relay setup request was sent to ${target.hostIpv4}:${target.setupPort}, but the browser could not confirm the response. Refresh or retry setup in a minute to verify whether the VM accepted the mapped ports.`
           }
         }
       }
@@ -1851,7 +1906,17 @@
         <article class="instance-row">
           <div>
             <strong>{instanceName(instance)}</strong>
-            <span>{shortHash(instance.item_hash)} · submitted {dateLabel(instance.time)}</span>
+            <div class="instance-inline-detail">
+              <span>{shortHash(instance.item_hash)} · submitted {dateLabel(instance.time)}</span>
+              <button
+                class="instance-copy-button"
+                type="button"
+                on:click={() => copyInstanceHash(instance)}
+                title="Copy full instance hash"
+              >
+                {instanceHashCopied[instance.item_hash] ? 'Copied' : 'Copy hash'}
+              </button>
+            </div>
             {#if instanceConfirmedAt(instance)}
               <span>confirmed {dateLabel(instanceConfirmedAt(instance) ?? undefined)}</span>
             {/if}

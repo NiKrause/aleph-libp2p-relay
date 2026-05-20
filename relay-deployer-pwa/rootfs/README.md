@@ -197,6 +197,19 @@ The temporary setup server inside the guest also exposes:
 - `GET /metadata` to return the describe payload once the relay has started and
   its announced/bootstrap addresses can be summarized
 
+For the `orbitdb-relay-pinner` profile, a successful configured deployment now
+has a clear public split:
+
+- the temporary setup server owns guest port `80` during `/health`,
+  `/configure`, and `/metadata`
+- Caddy terminates HTTPS and WSS on guest port `443`
+- the public proxy hostname serves both the relay HTTP helpers such as
+  `/health` and `/multiaddrs`, and the secure libp2p websocket transport on
+  `443`
+
+That means the same public hostname can be used both for operator-facing HTTPS
+checks and for browser-facing libp2p WSS bootstrap addresses.
+
 ## Flow Diagrams
 
 ### Go Relay Rootfs Creation And Aleph Publish

@@ -62,6 +62,15 @@ else
   exit 1
 fi
 
+# Drop toolchains and caches after dependency installation so the prebaked
+# qcow2 reflects the runtime footprint rather than the build footprint.
+apt-get purge -y build-essential
+apt-get autoremove -y
+apt-get clean
+rm -rf /var/lib/apt/lists/*
+rm -rf "${DATA_DIR}/.cache/corepack" "${DATA_DIR}/.npm" "${DATA_DIR}/.cache/npm"
+rm -rf "${INSTALL_DIR}/node_modules/.cache"
+
 mkdir -p "${INSTALL_DIR}/node_modules"
 ln -sfn "${INSTALL_DIR}" "${INSTALL_DIR}/node_modules/orbitdb-relay-pinner"
 

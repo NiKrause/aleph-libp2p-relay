@@ -14,6 +14,7 @@ OUT_DIR="${OUT_DIR:-${APP_DIR}/dist-rootfs}"
 BASE_URL="${BASE_URL:-https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2}"
 BASE_IMAGE="${OUT_DIR}/debian-12-genericcloud-amd64.qcow2"
 IMAGE_SIZE="${IMAGE_SIZE:-20G}"
+ROOTFS_SPARSIFY="${ROOTFS_SPARSIFY:-1}"
 
 require() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -322,5 +323,13 @@ case "${ROOTFS_PROFILE}" in
     virt-customize "${uc_rust_customize_args[@]}"
     ;;
 esac
+
+if [ "${ROOTFS_SPARSIFY}" = "1" ] && command -v virt-sparsify >/dev/null 2>&1; then
+  SPARSE_IMAGE="${IMAGE%.qcow2}.sparse.qcow2"
+  rm -f "${SPARSE_IMAGE}"
+  echo "Sparsifying and compressing ${IMAGE}..."
+  virt-sparsify --compress "${IMAGE}" "${SPARSE_IMAGE}"
+  mv "${SPARSE_IMAGE}" "${IMAGE}"
+fi
 
 echo "Rootfs image ready at ${IMAGE}"

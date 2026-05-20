@@ -1,16 +1,18 @@
 import { ALEPH_API_HOST } from './alephConfig'
+import { fetchWithTimeout } from './http'
 import {
+  configureOrbitdbRelaySetup as configureOrbitdbRelaySetupShared,
   fetch2n6WebAccessUrl,
   fetchCrnExecutionMap,
   fetchMessageEnvelope,
   fetchSchedulerAllocation,
+  notifyCrnAllocation as notifyCrnAllocationShared,
   normalizeExecution,
   normalizeMessageStatus
 } from '@le-space/browser'
 export {
   broadcastAlephMessage,
   broadcastInstanceMessage,
-  configureOrbitdbRelaySetup,
   createAlephBrowserClient,
   fetchBalance,
   fetch2n6WebAccessUrl,
@@ -20,7 +22,6 @@ export {
   fetchMessageEnvelope,
   fetchSchedulerAllocation,
   inspectDeploymentResult,
-  notifyCrnAllocation,
   normalizeMessageStatus,
   waitForDeploymentResult
 } from '@le-space/browser'
@@ -102,6 +103,173 @@ function manualAllocation(instance: InstanceMessage, crns: Crn[]): InstanceAlloc
     vmIpv6: null,
     period: null
   }
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms))
+}
+
+function isRetryableAllocationNotifyError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  const normalized = message.toLowerCase()
+
+  return (
+    normalized.includes('allocation notify failed: 503') &&
+    (normalized.includes('node hash not yet discovered') || normalized.includes('cannot accept targeted allocations'))
+  )
+}
+
+export async function notifyCrnAllocation(
+  crnUrl: string,
+  itemHash: string,
+  options?: {
+    attempts?: number
+    delayMs?: number
+  }
+) {
+  const attempts = Math.max(1, Number(options?.attempts ?? 6))
+  const delayMs = Math.max(0, Number(options?.delayMs ?? 2000))
+  let lastRetryableError: unknown = null
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await notifyCrnAllocationShared(crnUrl, itemHash)
+    } catch (error) {
+      if (!isRetryableAllocationNotifyError(error)) {
+        throw error
+      }
+
+      lastRetryableError = error
+      if (attempt < attempts - 1) {
+        await sleep(delayMs)
+        continue
+      }
+    }
+  }
+
+  if (lastRetryableError) {
+    return { status: 'unconfirmed' as const }
+  }
+
+  return { status: 'unconfirmed' as const }
+}
+
+export async function waitForOrbitdbRelaySetupEndpoint(args: {
+  hostIpv4: string
+  setupPort: number
+  attempts?: number
+  delayMs?: number
+  timeoutMs?: number
+}): Promise<{ status: 'ready' | 'timeout'; lastError?: string | null }> {
+  const attempts = Math.max(1, Number(args.attempts ?? 15))
+  const delayMs = Math.max(0, Number(args.delayMs ?? 4000))
+  const timeoutMs = Math.max(1, Number(args.timeoutMs ?? 10000))
+  let lastError: string | null = null
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetchWithTimeout(`http://${args.hostIpv4}:${args.setupPort}/health`, {
+        cache: 'no-cache',
+        mode: 'cors'
+      }, timeoutMs)
+
+      if (response.ok) {
+        return { status: 'ready', lastError: null }
+      }
+
+      lastError = `HTTP ${response.status}`
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error)
+    }
+
+    if (attempt < attempts - 1) {
+      await sleep(delayMs)
+    }
+  }
+
+  return { status: 'timeout', lastError }
+}
+
+export async function fetchOrbitdbRelayMetadata(args: {
+  hostIpv4: string
+  setupPort: number
+  attempts?: number
+  delayMs?: number
+  timeoutMs?: number
+}): Promise<{
+  status: 'ready' | 'timeout'
+  metadata?: unknown
+  payload?: unknown
+  lastError?: string | null
+}> {
+  const attempts = Math.max(1, Number(args.attempts ?? 60))
+  const delayMs = Math.max(0, Number(args.delayMs ?? 3000))
+  const timeoutMs = Math.max(1, Number(args.timeoutMs ?? 180000))
+  let lastError: string | null = null
+  let lastPayload: unknown = null
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetchWithTimeout(`http://${args.hostIpv4}:${args.setupPort}/metadata`, {
+        cache: 'no-cache',
+        mode: 'cors'
+      }, timeoutMs)
+      const payload = await response.json().catch(() => null)
+      lastPayload = payload
+
+      const ready =
+        response.ok &&
+        payload &&
+        typeof payload === 'object' &&
+        (payload as { status?: unknown }).status === 'ready'
+
+      if (ready) {
+        return {
+          status: 'ready',
+          metadata:
+            payload && typeof payload === 'object'
+              ? ((payload as { metadata?: unknown }).metadata ?? null)
+              : null,
+          payload,
+          lastError: null
+        }
+      }
+
+      lastError =
+        response.status >= 500
+          ? `HTTP ${response.status}`
+          : payload && typeof payload === 'object' && 'status' in payload
+            ? `status=${String((payload as { status?: unknown }).status)}`
+            : `HTTP ${response.status}`
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error)
+    }
+
+    if (attempt < attempts - 1) {
+      await sleep(delayMs)
+    }
+  }
+
+  return {
+    status: 'timeout',
+    payload: lastPayload,
+    lastError
+  }
+}
+
+export async function configureOrbitdbRelaySetup(args: {
+  hostIpv4: string
+  publicIpv6?: string | null
+  setupPort: number
+  tcpPort: number
+  wsPort: number
+  proxyUrl?: string | null
+  metricsPort?: number | null
+  metricsHttpsPort?: number | null
+  webrtcPort?: number | null
+  quicPort?: number | null
+}) {
+  return await configureOrbitdbRelaySetupShared(args)
 }
 
 export async function fetchInstanceRuntimeDetails(

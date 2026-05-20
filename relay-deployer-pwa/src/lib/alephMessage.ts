@@ -165,6 +165,7 @@ export async function deployInstance(args: {
   channel?: string
   now?: number
 }): Promise<DeploymentResult> {
+  const browserFetch: typeof globalThis.fetch = (input, init) => globalThis.fetch(input, init)
   const content = createInstanceContent({
     address: args.sender,
     form: args.form,
@@ -181,7 +182,7 @@ export async function deployInstance(args: {
       content,
       hasher: sha256Hex,
       signer: personalSign,
-      fetch,
+      fetch: browserFetch,
       apiHost: ALEPH_API_HOST,
       channel: args.channel ?? ALEPH_DEFAULT_CHANNEL,
       sync: false,

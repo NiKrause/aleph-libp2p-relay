@@ -2,11 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   broadcastInstanceMessage,
   configureOrbitdbRelaySetup,
+  fetchOrbitdbRelayMetadata,
   fetchBalance,
   fetchInstanceRuntimeDetails,
   fetchInstances,
   inspectDeploymentResult,
-  notifyCrnAllocation
+  notifyCrnAllocation,
+  waitForOrbitdbRelaySetupEndpoint
 } from './alephApi'
 
 afterEach(() => {
@@ -633,6 +635,28 @@ describe('Aleph API client', () => {
     })
   })
 
+  it('retries transient CRN allocation 503 responses before confirming success', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: '503: Node hash not yet discovered, cannot accept targeted allocations' }), {
+          status: 503
+        })
+      )
+      .mockResolvedValueOnce(new Response('{}', { status: 200 }))
+
+    await expect(
+      notifyCrnAllocation('https://selected-crn.example/', 'a'.repeat(64), {
+        attempts: 2,
+        delayMs: 0
+      })
+    ).resolves.toEqual({
+      status: 'confirmed'
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('posts mapped ports to the temporary orbitdb relay setup endpoint', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(JSON.stringify({ status: 'configured' }), { status: 200 })
@@ -689,5 +713,47 @@ describe('Aleph API client', () => {
         wsPort: 28192
       })
     ).resolves.toEqual({ status: 'unconfirmed' })
+  })
+
+  it('waits for the setup endpoint health check to become ready', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('not ready', { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'ok' }), { status: 200 }))
+
+    await expect(
+      waitForOrbitdbRelaySetupEndpoint({
+        hostIpv4: '62.141.40.252',
+        setupPort: 28080,
+        attempts: 2,
+        delayMs: 0,
+        timeoutMs: 1000
+      })
+    ).resolves.toEqual({ status: 'ready', lastError: null })
+
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/^http:\/\/62\.141\.40\.252:28080\/health\?_ts=\d+$/)
+  })
+
+  it('polls relay metadata until the guest reports ready', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'configuring' }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'ready', metadata: { peer_id: '12D3KooWTest' } }), { status: 200 })
+      )
+
+    await expect(
+      fetchOrbitdbRelayMetadata({
+        hostIpv4: '62.141.40.252',
+        setupPort: 28080,
+        attempts: 2,
+        delayMs: 0,
+        timeoutMs: 1000
+      })
+    ).resolves.toEqual({
+      status: 'ready',
+      metadata: { peer_id: '12D3KooWTest' },
+      payload: { status: 'ready', metadata: { peer_id: '12D3KooWTest' } },
+      lastError: null
+    })
   })
 })

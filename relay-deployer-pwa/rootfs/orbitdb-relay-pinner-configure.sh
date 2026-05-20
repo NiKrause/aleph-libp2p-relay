@@ -60,12 +60,20 @@ write_caddyfile() {
   local hostname="$1"
   mkdir -p "$(dirname "${CADDYFILE}")"
   cat > "${CADDYFILE}" <<EOF
+{
+  auto_https disable_redirects
+}
+
 ${hostname} {
   handle /health {
     reverse_proxy 127.0.0.1:${CADDY_UPSTREAM_METRICS_PORT}
   }
 
   handle /multiaddrs {
+    reverse_proxy 127.0.0.1:${CADDY_UPSTREAM_METRICS_PORT}
+  }
+
+  handle /multiaddresses {
     reverse_proxy 127.0.0.1:${CADDY_UPSTREAM_METRICS_PORT}
   }
 
